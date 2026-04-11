@@ -1,0 +1,19 @@
+services:
+  laneyes:
+    build: .
+    container_name: laneyes
+    ports:
+      - "5000:5000"
+    network_mode: host
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    environment:
+      - NETWORK_CIDR=192.168.1.0/24
+      - SECRET_KEY=change-me-in-production
+    volumes:
+      - laneyes-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  laneyes-data:

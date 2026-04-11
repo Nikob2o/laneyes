@@ -1,0 +1,4 @@
+flask>=3.0
+flask-sqlalchemy>=3.1
+python-nmap>=0.7
+mac-vendor-lookup>=0.1

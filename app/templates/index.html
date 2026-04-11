@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LanEyes - Network Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1><span class="logo-icon">&#9678;</span> LanEyes</h1>
+            <p class="subtitle">Network Monitor</p>
+        </div>
+        <div class="header-actions">
+            <button id="btn-quick-scan" class="btn btn-primary" onclick="quickScan()">
+                <span class="btn-icon">&#9889;</span> Quick Scan
+            </button>
+            <button id="btn-deep-scan" class="btn btn-secondary" onclick="deepScanAll()">
+                <span class="btn-icon">&#128269;</span> Deep Scan
+            </button>
+        </div>
+    </header>
+
+    <main>
+        <!-- Stats Bar -->
+        <section class="stats-bar">
+            <div class="stat-card">
+                <span class="stat-value" id="stat-total">-</span>
+                <span class="stat-label">Total Devices</span>
+            </div>
+            <div class="stat-card stat-online">
+                <span class="stat-value" id="stat-online">-</span>
+                <span class="stat-label">Online</span>
+            </div>
+            <div class="stat-card stat-offline">
+                <span class="stat-value" id="stat-offline">-</span>
+                <span class="stat-label">Offline</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-value" id="stat-scans">-</span>
+                <span class="stat-label">Total Scans</span>
+            </div>
+        </section>
+
+        <!-- Filter Bar -->
+        <section class="filter-bar">
+            <button class="filter-btn active" data-filter="all" onclick="filterDevices('all', this)">All</button>
+            <button class="filter-btn" data-filter="online" onclick="filterDevices('online', this)">Online</button>
+            <button class="filter-btn" data-filter="offline" onclick="filterDevices('offline', this)">Offline</button>
+            <input type="text" id="search-input" placeholder="Search by name, IP, MAC..." oninput="searchDevices(this.value)">
+        </section>
+
+        <!-- Devices Table -->
+        <section class="devices-section">
+            <table id="devices-table">
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Name</th>
+                        <th>IP Address</th>
+                        <th>MAC Address</th>
+                        <th>Vendor</th>
+                        <th>OS</th>
+                        <th>First Seen</th>
+                        <th>Last Seen</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="devices-body">
+                    <tr><td colspan="9" class="empty-state">Click "Quick Scan" to discover devices on your network</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- Scan Status -->
+        <div id="scan-status" class="scan-status hidden">
+            <div class="spinner"></div>
+            <span id="scan-status-text">Scanning...</span>
+        </div>
+    </main>
+
+    <!-- Device Detail Modal -->
+    <div id="modal-overlay" class="modal-overlay hidden" onclick="closeModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2 id="modal-title">Device Details</h2>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
