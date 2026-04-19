@@ -6,6 +6,7 @@
     <title>LanEyes - Network Monitor</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo.svg') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <header>
@@ -27,34 +28,84 @@
     </header>
 
     <main>
-        <!-- Stats Bar -->
-        <section class="stats-bar">
-            <div class="stat-card">
-                <span class="stat-value" id="stat-total">-</span>
-                <span class="stat-label">Total Devices</span>
-            </div>
-            <div class="stat-card stat-online">
-                <span class="stat-value" id="stat-online">-</span>
-                <span class="stat-label">Online</span>
-            </div>
-            <div class="stat-card stat-offline">
-                <span class="stat-value" id="stat-offline">-</span>
-                <span class="stat-label">Offline</span>
-            </div>
-            <div class="stat-card">
-                <span class="stat-value" id="stat-scans">-</span>
-                <span class="stat-label">Total Scans</span>
-            </div>
-        </section>
-
         <!-- Tabs -->
         <section class="tabs-bar">
-            <button class="tab-btn active" data-tab="devices" onclick="switchTab('devices', this)">Devices</button>
+            <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard', this)">Dashboard</button>
+            <button class="tab-btn" data-tab="devices" onclick="switchTab('devices', this)">Devices</button>
             <button class="tab-btn" data-tab="logs" onclick="switchTab('logs', this)">Logs</button>
         </section>
 
+        <!-- Dashboard Tab -->
+        <div id="tab-dashboard" class="tab-content">
+            <!-- Stat cards -->
+            <section class="dash-stats">
+                <div class="stat-card">
+                    <div class="stat-row">
+                        <span class="stat-value" id="dash-total">-</span>
+                        <span class="stat-trend" id="dash-online-pct">-</span>
+                    </div>
+                    <span class="stat-label">Total Devices</span>
+                </div>
+                <div class="stat-card stat-online">
+                    <span class="stat-value" id="dash-online">-</span>
+                    <span class="stat-label">Online now</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-value" id="dash-new">-</span>
+                    <span class="stat-label">New this week</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-value" id="dash-unnamed">-</span>
+                    <span class="stat-label">Unnamed devices</span>
+                </div>
+                <div class="stat-card stat-lastscan">
+                    <span class="stat-value" id="dash-lastscan">-</span>
+                    <span class="stat-label" id="dash-lastscan-status">Last scan</span>
+                </div>
+            </section>
+
+            <!-- Widgets grid -->
+            <section class="dash-grid">
+                <div class="dash-widget dash-wide">
+                    <h3 class="widget-title">Devices discovered — last 7 days</h3>
+                    <div class="chart-container"><canvas id="chart-timeline"></canvas></div>
+                </div>
+
+                <div class="dash-widget">
+                    <h3 class="widget-title">Top vendors</h3>
+                    <div class="chart-container"><canvas id="chart-vendors"></canvas></div>
+                </div>
+
+                <div class="dash-widget">
+                    <h3 class="widget-title">OS families</h3>
+                    <div class="chart-container"><canvas id="chart-os"></canvas></div>
+                </div>
+
+                <div class="dash-widget">
+                    <h3 class="widget-title">New devices</h3>
+                    <ul class="widget-list" id="list-new-devices">
+                        <li class="widget-empty">None in the last 7 days</li>
+                    </ul>
+                </div>
+
+                <div class="dash-widget">
+                    <h3 class="widget-title">Ghost devices <span class="widget-hint">offline &gt;7 days</span></h3>
+                    <ul class="widget-list" id="list-ghost-devices">
+                        <li class="widget-empty">None</li>
+                    </ul>
+                </div>
+
+                <div class="dash-widget dash-wide">
+                    <h3 class="widget-title">Recent scan activity</h3>
+                    <ul class="widget-list widget-events" id="list-recent-events">
+                        <li class="widget-empty">No scans yet</li>
+                    </ul>
+                </div>
+            </section>
+        </div>
+
         <!-- Devices Tab -->
-        <div id="tab-devices" class="tab-content">
+        <div id="tab-devices" class="tab-content hidden">
             <section class="filter-bar">
                 <button class="filter-btn active" data-filter="all" onclick="filterDevices('all', this)">All</button>
                 <button class="filter-btn" data-filter="online" onclick="filterDevices('online', this)">Online</button>

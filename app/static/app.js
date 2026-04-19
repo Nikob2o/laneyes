@@ -1,14 +1,15 @@
 let allDevices = [];
 let currentFilter = "all";
 let currentSearch = "";
-let currentTab = "devices";
+let currentTab = "dashboard";
 let currentLogStatus = "all";
 let currentLogType = "all";
+let charts = {};  // chart instances for cleanup
+const CHART_COLORS = ["#6c5ce7", "#00b894", "#fdcb6e", "#e17055", "#74b9ff", "#a29bfe", "#55efc4", "#ff7675"];
 
 // --- Init ---
 document.addEventListener("DOMContentLoaded", () => {
-    loadStats();
-    loadDevices();
+    loadDashboard();
 });
 
 // --- Tabs ---
@@ -17,10 +18,214 @@ function switchTab(tab, btn) {
     document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
     if (btn) btn.classList.add("active");
 
+    document.getElementById("tab-dashboard").classList.toggle("hidden", tab !== "dashboard");
     document.getElementById("tab-devices").classList.toggle("hidden", tab !== "devices");
     document.getElementById("tab-logs").classList.toggle("hidden", tab !== "logs");
 
-    if (tab === "logs") loadLogs();
+    if (tab === "dashboard") loadDashboard();
+    else if (tab === "devices") { loadStats(); loadDevices(currentFilter); }
+    else if (tab === "logs") loadLogs();
+}
+
+// --- Dashboard ---
+async function loadDashboard() {
+    try {
+        const data = await api("/api/dashboard");
+        renderDashboardStats(data.stats);
+        renderTimelineChart(data.timeline);
+        renderVendorsChart(data.vendors);
+        renderOsChart(data.os_families);
+        renderNewDevices(data.new_devices);
+        renderGhostDevices(data.ghost_devices);
+        renderRecentEvents(data.recent_events);
+    } catch (e) {
+        console.error("Failed to load dashboard:", e);
+    }
+}
+
+function renderDashboardStats(s) {
+    document.getElementById("dash-total").textContent = s.total_devices;
+    document.getElementById("dash-online-pct").textContent = `${s.online_percent}% online`;
+    document.getElementById("dash-online").textContent = s.online;
+    document.getElementById("dash-new").textContent = s.new_this_week;
+    document.getElementById("dash-unnamed").textContent = s.unnamed;
+
+    const lsEl = document.getElementById("dash-lastscan");
+    const lsStatus = document.getElementById("dash-lastscan-status");
+    if (s.last_scan) {
+        lsEl.textContent = formatAgo(s.last_scan.age_seconds);
+        lsStatus.textContent = `Last ${s.last_scan.scan_type} scan — ${s.last_scan.status}`;
+    } else {
+        lsEl.textContent = "Never";
+        lsStatus.textContent = "Last scan";
+    }
+}
+
+function destroyChart(id) {
+    if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+}
+
+function renderTimelineChart(timeline) {
+    destroyChart("timeline");
+    const ctx = document.getElementById("chart-timeline");
+    if (!ctx) return;
+    const labels = timeline.map(p => new Date(p.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }));
+    const data = timeline.map(p => p.hosts);
+    charts.timeline = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels,
+            datasets: [{
+                label: "Hosts found",
+                data,
+                borderColor: "#6c5ce7",
+                backgroundColor: "rgba(108, 92, 231, 0.15)",
+                fill: true,
+                tension: 0.3,
+                pointBackgroundColor: "#6c5ce7",
+                pointBorderColor: "#fff",
+                pointRadius: 4,
+            }],
+        },
+        options: chartBaseOptions({ showY: true }),
+    });
+}
+
+function renderVendorsChart(vendors) {
+    destroyChart("vendors");
+    const ctx = document.getElementById("chart-vendors");
+    if (!ctx) return;
+    charts.vendors = new Chart(ctx, {
+        type: "bar",
+        data: {
+            labels: vendors.map(v => v.name.length > 20 ? v.name.slice(0, 20) + "…" : v.name),
+            datasets: [{
+                data: vendors.map(v => v.count),
+                backgroundColor: CHART_COLORS,
+                borderRadius: 4,
+            }],
+        },
+        options: {
+            ...chartBaseOptions({ showY: false, noLegend: true }),
+            indexAxis: "y",
+        },
+    });
+}
+
+function renderOsChart(osFamilies) {
+    destroyChart("os");
+    const ctx = document.getElementById("chart-os");
+    if (!ctx) return;
+    charts.os = new Chart(ctx, {
+        type: "doughnut",
+        data: {
+            labels: osFamilies.map(o => o.name),
+            datasets: [{
+                data: osFamilies.map(o => o.count),
+                backgroundColor: CHART_COLORS,
+                borderColor: "#1a1d27",
+                borderWidth: 2,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: "right",
+                    labels: { color: "#8b8fa3", font: { size: 11 }, boxWidth: 12 },
+                },
+            },
+        },
+    });
+}
+
+function chartBaseOptions({ showY = true, noLegend = true } = {}) {
+    return {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: !noLegend, labels: { color: "#8b8fa3" } },
+            tooltip: { backgroundColor: "#1a1d27", borderColor: "#2a2d3a", borderWidth: 1 },
+        },
+        scales: {
+            x: {
+                ticks: { color: "#8b8fa3", font: { size: 11 } },
+                grid: { color: "rgba(138, 143, 163, 0.08)" },
+            },
+            y: {
+                display: showY,
+                beginAtZero: true,
+                ticks: { color: "#8b8fa3", font: { size: 11 }, precision: 0 },
+                grid: { color: "rgba(138, 143, 163, 0.08)" },
+            },
+        },
+    };
+}
+
+function renderNewDevices(devices) {
+    const ul = document.getElementById("list-new-devices");
+    if (devices.length === 0) {
+        ul.innerHTML = '<li class="widget-empty">None in the last 7 days</li>';
+        return;
+    }
+    ul.innerHTML = devices.map(d => `
+        <li class="clickable" onclick="openDeviceModal(${d.id})">
+            <div class="widget-device-main">
+                <div class="widget-device-name" title="${esc(d.display_name)}">${esc(d.display_name)}</div>
+                <div class="widget-device-meta">${esc(d.ip_address || "-")} &middot; ${esc(d.vendor || "unknown")}</div>
+            </div>
+            <span class="widget-time" title="${formatDate(d.first_seen)}">${formatAgoDate(d.first_seen)}</span>
+        </li>
+    `).join("");
+}
+
+function renderGhostDevices(devices) {
+    const ul = document.getElementById("list-ghost-devices");
+    if (devices.length === 0) {
+        ul.innerHTML = '<li class="widget-empty">None</li>';
+        return;
+    }
+    ul.innerHTML = devices.map(d => `
+        <li class="clickable" onclick="openDeviceModal(${d.id})">
+            <div class="widget-device-main">
+                <div class="widget-device-name" title="${esc(d.display_name)}">${esc(d.display_name)}</div>
+                <div class="widget-device-meta">${esc(d.mac_address)}</div>
+            </div>
+            <span class="widget-time" title="${formatDate(d.last_seen)}">${formatAgoDate(d.last_seen)}</span>
+        </li>
+    `).join("");
+}
+
+function renderRecentEvents(events) {
+    const ul = document.getElementById("list-recent-events");
+    if (events.length === 0) {
+        ul.innerHTML = '<li class="widget-empty">No scans yet</li>';
+        return;
+    }
+    ul.innerHTML = events.map(e => `
+        <li class="clickable" onclick="openEventModal(${e.id})">
+            <span class="status-badge ${e.status}">${e.status}</span>
+            <span class="log-type-pill">${e.scan_type}</span>
+            <div class="widget-device-main" style="flex: 1;">
+                <div class="widget-device-meta" title="${esc(e.message || '')}">${esc(truncate(e.message, 60) || "-")}</div>
+            </div>
+            <span class="widget-time">${formatAgoDate(e.started_at)}</span>
+        </li>
+    `).join("");
+}
+
+function formatAgo(seconds) {
+    if (seconds < 60) return `${seconds}s ago`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+function formatAgoDate(isoStr) {
+    if (!isoStr) return "-";
+    const seconds = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
+    return formatAgo(seconds);
 }
 
 // --- API Helpers ---
