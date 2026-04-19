@@ -1,0 +1,58 @@
+name: Update Helm Chart
+
+on:
+  workflow_run:
+    workflows: ["CI - Build & Push"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  update-helm:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Get image tag
+        id: image_tag
+        run: |
+          SHORT_SHA=$(echo ${{ github.event.workflow_run.head_sha }} | cut -c1-7)
+          echo "tag=sha-${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "📦 New image tag: sha-${SHORT_SHA}"
+
+      - name: Checkout ansible-k3s repo
+        uses: actions/checkout@v4
+        with:
+          repository: Nikob2o/ansible-k3s
+          token: ${{ secrets.PAT_TOKEN }}
+          path: ansible-k3s
+
+      - name: Update values.yaml
+        run: |
+          cd ansible-k3s
+          sed -i "s|tag: .*|tag: ${{ steps.image_tag.outputs.tag }}|" helm-charts/laneyes/values.yaml
+
+          echo "✅ Updated values.yaml:"
+          grep "tag:" helm-charts/laneyes/values.yaml
+
+      - name: Commit and push to ansible-k3s
+        run: |
+          cd ansible-k3s
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add helm-charts/laneyes/values.yaml
+
+          if git diff --staged --quiet; then
+            echo "⚠️  No changes to commit"
+          else
+            git commit -m "Update laneyes image to ${{ steps.image_tag.outputs.tag }}"
+            git push
+            echo "✅ Pushed to ansible-k3s — ArgoCD will sync"
+          fi
+
+      - name: Summary
+        run: |
+          echo "### Helm Chart Updated" >> $GITHUB_STEP_SUMMARY
+          echo "**New Image Tag:** \`${{ steps.image_tag.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**File:** \`helm-charts/laneyes/values.yaml\`" >> $GITHUB_STEP_SUMMARY
