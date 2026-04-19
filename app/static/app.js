@@ -80,16 +80,16 @@ function renderDevices() {
     tbody.innerHTML = devices.map(d => `
         <tr>
             <td><span class="status-dot ${d.is_online ? 'online' : 'offline'}"></span></td>
-            <td>
+            <td title="${esc(d.display_name)}${d.hostname && d.custom_name ? ' (' + esc(d.hostname) + ')' : ''}">
                 <div class="device-name">${esc(d.display_name)}</div>
                 ${d.custom_name && d.hostname ? `<div class="device-hostname">${esc(d.hostname)}</div>` : ""}
             </td>
-            <td>${esc(d.ip_address || "-")}</td>
-            <td>${esc(d.mac_address)}</td>
-            <td>${esc(d.vendor || "-")}</td>
-            <td>${esc(d.os_info || "-")}</td>
-            <td>${formatDate(d.first_seen)}</td>
-            <td>${formatDate(d.last_seen)}</td>
+            <td title="${esc(d.ip_address || '')}">${esc(d.ip_address || "-")}</td>
+            <td title="${esc(d.mac_address)}">${esc(d.mac_address)}</td>
+            <td title="${esc(d.vendor || '')}">${esc(d.vendor || "-")}</td>
+            <td title="${esc(d.os_info || '')}">${esc(d.os_info || "-")}</td>
+            <td title="${formatDate(d.first_seen)}">${formatDate(d.first_seen)}</td>
+            <td title="${formatDate(d.last_seen)}">${formatDate(d.last_seen)}</td>
             <td>
                 <div class="action-btns">
                     <button class="action-btn" onclick="openDeviceModal(${d.id})" title="Details">&#9776;</button>
@@ -367,12 +367,12 @@ function renderLogs(events) {
         <tr class="log-row" onclick="openEventModal(${e.id})">
             <td><span class="status-badge ${e.status}">${e.status}</span></td>
             <td><span class="log-type-pill">${e.scan_type}</span></td>
-            <td>${esc(e.target || "-")}</td>
+            <td title="${esc(e.target || '')}">${esc(e.target || "-")}</td>
             <td>${e.hosts_found ?? 0}</td>
             <td>${e.new_devices ?? 0}</td>
             <td>${formatDuration(e.duration_ms)}</td>
-            <td>${formatDate(e.started_at)}</td>
-            <td class="log-message" title="${esc(e.message || "")}">${esc(truncate(e.message, 80))}</td>
+            <td title="${formatDate(e.started_at)}">${formatDate(e.started_at)}</td>
+            <td title="${esc(e.message || '')}">${esc(e.message || "-")}</td>
         </tr>
     `).join("");
 }

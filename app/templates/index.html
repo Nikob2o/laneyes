@@ -4,12 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LanEyes - Network Monitor</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo.svg') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <header>
         <div class="header-content">
-            <h1><span class="logo-icon">&#9678;</span> LanEyes</h1>
+            <h1>
+                <img src="{{ url_for('static', filename='logo.svg') }}" alt="LanEyes" class="logo-img">
+                LanEyes
+            </h1>
             <p class="subtitle">Network Monitor</p>
         </div>
         <div class="header-actions">

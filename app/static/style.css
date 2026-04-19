@@ -36,9 +36,16 @@ header {
 .header-content h1 {
     font-size: 1.5rem;
     font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
-.logo-icon { color: var(--primary); }
+.logo-img {
+    width: 36px;
+    height: 36px;
+    filter: drop-shadow(0 0 8px rgba(108, 92, 231, 0.4));
+}
 
 .subtitle {
     color: var(--text-muted);
@@ -218,15 +225,6 @@ header {
     background: var(--surface-hover);
 }
 
-.log-message {
-    max-width: 300px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--text-muted);
-    font-size: 0.85rem;
-}
-
 .log-type-pill {
     display: inline-block;
     padding: 0.1rem 0.5rem;
@@ -295,11 +293,11 @@ header {
 /* Table */
 .devices-section {
     padding: 0 2rem 2rem;
-    overflow-x: auto;
 }
 
 table {
     width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
     background: var(--surface);
     border-radius: var(--radius);
@@ -316,6 +314,8 @@ thead th {
     letter-spacing: 0.05em;
     color: var(--text-muted);
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 tbody td {
@@ -323,7 +323,30 @@ tbody td {
     border-top: 1px solid var(--border);
     font-size: 0.9rem;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
+
+/* Devices table column widths */
+#devices-table th:nth-child(1), #devices-table td:nth-child(1) { width: 50px; }    /* Status */
+#devices-table th:nth-child(2), #devices-table td:nth-child(2) { width: 18%; }     /* Name */
+#devices-table th:nth-child(3), #devices-table td:nth-child(3) { width: 110px; }   /* IP */
+#devices-table th:nth-child(4), #devices-table td:nth-child(4) { width: 140px; }   /* MAC */
+#devices-table th:nth-child(5), #devices-table td:nth-child(5) { width: 14%; }     /* Vendor */
+#devices-table th:nth-child(6), #devices-table td:nth-child(6) { width: auto; }    /* OS */
+#devices-table th:nth-child(7), #devices-table td:nth-child(7) { width: 120px; }   /* First Seen */
+#devices-table th:nth-child(8), #devices-table td:nth-child(8) { width: 120px; }   /* Last Seen */
+#devices-table th:nth-child(9), #devices-table td:nth-child(9) { width: 80px; }    /* Actions */
+
+/* Logs table column widths */
+#logs-table th:nth-child(1), #logs-table td:nth-child(1) { width: 90px; }    /* Status */
+#logs-table th:nth-child(2), #logs-table td:nth-child(2) { width: 75px; }    /* Type */
+#logs-table th:nth-child(3), #logs-table td:nth-child(3) { width: 18%; }     /* Target */
+#logs-table th:nth-child(4), #logs-table td:nth-child(4) { width: 70px; }    /* Hosts */
+#logs-table th:nth-child(5), #logs-table td:nth-child(5) { width: 60px; }    /* New */
+#logs-table th:nth-child(6), #logs-table td:nth-child(6) { width: 90px; }    /* Duration */
+#logs-table th:nth-child(7), #logs-table td:nth-child(7) { width: 140px; }   /* Started */
+#logs-table th:nth-child(8), #logs-table td:nth-child(8) { width: auto; }    /* Message */
 
 tbody tr:hover { background: var(--surface-hover); }
 

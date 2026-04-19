@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="eye-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7d6ff0"/>
+      <stop offset="100%" stop-color="#4834d4"/>
+    </linearGradient>
+    <radialGradient id="iris-grad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00d2c6"/>
+      <stop offset="60%" stop-color="#00b894"/>
+      <stop offset="100%" stop-color="#006d5a"/>
+    </radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Eye outer shape -->
+  <path d="M 4 32 Q 32 6 60 32 Q 32 58 4 32 Z"
+        fill="url(#eye-grad)"
+        stroke="#a29bfe"
+        stroke-width="1.5"/>
+
+  <!-- Eye white -->
+  <path d="M 8 32 Q 32 11 56 32 Q 32 53 8 32 Z"
+        fill="#1a1d27"/>
+
+  <!-- Iris -->
+  <circle cx="32" cy="32" r="13" fill="url(#iris-grad)" filter="url(#glow)"/>
+
+  <!-- Pupil -->
+  <circle cx="32" cy="32" r="6" fill="#0f1117"/>
+
+  <!-- Highlight -->
+  <circle cx="28" cy="28" r="2.5" fill="#ffffff" opacity="0.85"/>
+  <circle cx="35" cy="35" r="1" fill="#ffffff" opacity="0.5"/>
+
+  <!-- Scan lines (network vibe) -->
+  <circle cx="32" cy="32" r="19" fill="none" stroke="#6c5ce7" stroke-width="0.8" stroke-dasharray="2 3" opacity="0.6"/>
+  <circle cx="32" cy="32" r="24" fill="none" stroke="#6c5ce7" stroke-width="0.5" stroke-dasharray="1 4" opacity="0.35"/>
+</svg>
