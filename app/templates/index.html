@@ -43,35 +43,78 @@
             </div>
         </section>
 
-        <!-- Filter Bar -->
-        <section class="filter-bar">
-            <button class="filter-btn active" data-filter="all" onclick="filterDevices('all', this)">All</button>
-            <button class="filter-btn" data-filter="online" onclick="filterDevices('online', this)">Online</button>
-            <button class="filter-btn" data-filter="offline" onclick="filterDevices('offline', this)">Offline</button>
-            <input type="text" id="search-input" placeholder="Search by name, IP, MAC..." oninput="searchDevices(this.value)">
+        <!-- Tabs -->
+        <section class="tabs-bar">
+            <button class="tab-btn active" data-tab="devices" onclick="switchTab('devices', this)">Devices</button>
+            <button class="tab-btn" data-tab="logs" onclick="switchTab('logs', this)">Logs</button>
         </section>
 
-        <!-- Devices Table -->
-        <section class="devices-section">
-            <table id="devices-table">
-                <thead>
-                    <tr>
-                        <th>Status</th>
-                        <th>Name</th>
-                        <th>IP Address</th>
-                        <th>MAC Address</th>
-                        <th>Vendor</th>
-                        <th>OS</th>
-                        <th>First Seen</th>
-                        <th>Last Seen</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="devices-body">
-                    <tr><td colspan="9" class="empty-state">Click "Quick Scan" to discover devices on your network</td></tr>
-                </tbody>
-            </table>
-        </section>
+        <!-- Devices Tab -->
+        <div id="tab-devices" class="tab-content">
+            <section class="filter-bar">
+                <button class="filter-btn active" data-filter="all" onclick="filterDevices('all', this)">All</button>
+                <button class="filter-btn" data-filter="online" onclick="filterDevices('online', this)">Online</button>
+                <button class="filter-btn" data-filter="offline" onclick="filterDevices('offline', this)">Offline</button>
+                <input type="text" id="search-input" placeholder="Search by name, IP, MAC..." oninput="searchDevices(this.value)">
+            </section>
+
+            <section class="devices-section">
+                <table id="devices-table">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Name</th>
+                            <th>IP Address</th>
+                            <th>MAC Address</th>
+                            <th>Vendor</th>
+                            <th>OS</th>
+                            <th>First Seen</th>
+                            <th>Last Seen</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="devices-body">
+                        <tr><td colspan="9" class="empty-state">Click "Quick Scan" to discover devices on your network</td></tr>
+                    </tbody>
+                </table>
+            </section>
+        </div>
+
+        <!-- Logs Tab -->
+        <div id="tab-logs" class="tab-content hidden">
+            <section class="filter-bar">
+                <button class="log-filter-btn active" data-log-filter="all" onclick="filterLogs('all', this)">All</button>
+                <button class="log-filter-btn" data-log-filter="success" onclick="filterLogs('success', this)">Success</button>
+                <button class="log-filter-btn" data-log-filter="partial" onclick="filterLogs('partial', this)">Partial</button>
+                <button class="log-filter-btn" data-log-filter="failed" onclick="filterLogs('failed', this)">Failed</button>
+                <span style="margin-left: 1rem; color: var(--text-muted); font-size: 0.85rem;">Type:</span>
+                <button class="log-type-btn active" data-log-type="all" onclick="filterLogType('all', this)">All</button>
+                <button class="log-type-btn" data-log-type="quick" onclick="filterLogType('quick', this)">Quick</button>
+                <button class="log-type-btn" data-log-type="deep" onclick="filterLogType('deep', this)">Deep</button>
+                <button class="btn btn-small" style="margin-left: auto; background: var(--danger); color: #fff;"
+                        onclick="clearLogs()">Clear All</button>
+            </section>
+
+            <section class="devices-section">
+                <table id="logs-table">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Type</th>
+                            <th>Target</th>
+                            <th>Hosts</th>
+                            <th>New</th>
+                            <th>Duration</th>
+                            <th>Started</th>
+                            <th>Message</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs-body">
+                        <tr><td colspan="8" class="empty-state">No scan events yet</td></tr>
+                    </tbody>
+                </table>
+            </section>
+        </div>
 
         <!-- Scan Status -->
         <div id="scan-status" class="scan-status hidden">
@@ -88,6 +131,17 @@
                 <button class="modal-close" onclick="closeModal()">&times;</button>
             </div>
             <div class="modal-body" id="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- Event Detail Modal -->
+    <div id="event-modal-overlay" class="modal-overlay hidden" onclick="closeEventModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2 id="event-modal-title">Scan Event</h2>
+                <button class="modal-close" onclick="closeEventModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="event-modal-body"></div>
         </div>
     </div>
 

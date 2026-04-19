@@ -1,12 +1,34 @@
 import json
 import socket
 import subprocess
+import traceback
 from datetime import datetime, timezone
 
 import nmap
 
 from app import db
-from app.models import Device, ScanRecord
+from app.models import Device, ScanRecord, ScanEvent
+
+
+def _record_event(scan_type, target, started_at, status, message,
+                  hosts_found=0, new_devices=0):
+    """Persist a ScanEvent row and return the dict."""
+    finished_at = datetime.now(timezone.utc)
+    duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+    event = ScanEvent(
+        scan_type=scan_type,
+        target=target,
+        status=status,
+        message=message,
+        hosts_found=hosts_found,
+        new_devices=new_devices,
+        started_at=started_at,
+        finished_at=finished_at,
+        duration_ms=duration_ms,
+    )
+    db.session.add(event)
+    db.session.commit()
+    return event
 
 
 def _get_mac_vendor(mac: str) -> str:
@@ -124,7 +146,7 @@ def _discover_hosts(network_cidr: str) -> list[dict]:
     return list(seen.values())
 
 
-def quick_scan(network_cidr: str) -> dict:
+def _quick_scan_impl(network_cidr: str) -> dict:
     """
     Quick scan: host discovery + hostname resolution + vendor lookup.
     Returns summary dict.
@@ -197,7 +219,7 @@ def quick_scan(network_cidr: str) -> dict:
     }
 
 
-def deep_scan(network_cidr: str, target_ip: str | None = None) -> dict:
+def _deep_scan_impl(network_cidr: str, target_ip: str | None = None) -> dict:
     """
     Deep scan: OS detection + port scan on a single target or whole network.
     Requires root/sudo for OS detection.
@@ -269,3 +291,57 @@ def deep_scan(network_cidr: str, target_ip: str | None = None) -> dict:
         "devices_scanned": len(devices_updated),
         "devices": [d.to_dict() for d in devices_updated],
     }
+
+
+# --- Public wrappers with event logging ---
+
+
+def quick_scan(network_cidr: str) -> dict:
+    """Run a quick scan and log the outcome as a ScanEvent."""
+    started_at = datetime.now(timezone.utc)
+    try:
+        result = _quick_scan_impl(network_cidr)
+        status = "success" if result["hosts_found"] > 0 else "partial"
+        message = (
+            f"Found {result['hosts_found']} hosts "
+            f"({result['new_devices']} new, {result['updated_devices']} updated)"
+        )
+        event = _record_event(
+            "quick", network_cidr, started_at, status, message,
+            hosts_found=result["hosts_found"],
+            new_devices=result["new_devices"],
+        )
+        result["event_id"] = event.id
+        return result
+    except Exception as e:
+        db.session.rollback()
+        err_msg = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
+        _record_event("quick", network_cidr, started_at, "failed", err_msg)
+        raise
+
+
+def deep_scan(network_cidr: str, target_ip: str | None = None) -> dict:
+    """Run a deep scan and log the outcome as a ScanEvent."""
+    started_at = datetime.now(timezone.utc)
+    target = target_ip or network_cidr
+    try:
+        result = _deep_scan_impl(network_cidr, target_ip)
+        count = result["devices_scanned"]
+        status = "success" if count > 0 else "partial"
+        message = (
+            f"Deep scan analyzed {count} device(s)"
+            if count > 0
+            else "Deep scan completed but no devices were analyzed "
+                 "(check nmap permissions or target reachability)"
+        )
+        event = _record_event(
+            "deep", target, started_at, status, message,
+            hosts_found=count,
+        )
+        result["event_id"] = event.id
+        return result
+    except Exception as e:
+        db.session.rollback()
+        err_msg = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
+        _record_event("deep", target, started_at, "failed", err_msg)
+        raise

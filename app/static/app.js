@@ -1,12 +1,27 @@
 let allDevices = [];
 let currentFilter = "all";
 let currentSearch = "";
+let currentTab = "devices";
+let currentLogStatus = "all";
+let currentLogType = "all";
 
 // --- Init ---
 document.addEventListener("DOMContentLoaded", () => {
     loadStats();
     loadDevices();
 });
+
+// --- Tabs ---
+function switchTab(tab, btn) {
+    currentTab = tab;
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    if (btn) btn.classList.add("active");
+
+    document.getElementById("tab-devices").classList.toggle("hidden", tab !== "devices");
+    document.getElementById("tab-logs").classList.toggle("hidden", tab !== "logs");
+
+    if (tab === "logs") loadLogs();
+}
 
 // --- API Helpers ---
 async function api(url, options = {}) {
@@ -319,7 +334,150 @@ function formatDate(isoStr) {
     });
 }
 
-// Keyboard: close modal on Escape
+// Keyboard: close modals on Escape
 document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeModal();
+    if (e.key === "Escape") {
+        closeModal();
+        closeEventModal();
+    }
 });
+
+// --- Logs ---
+async function loadLogs() {
+    const params = new URLSearchParams();
+    if (currentLogType !== "all") params.set("type", currentLogType);
+    if (currentLogStatus !== "all") params.set("status", currentLogStatus);
+
+    try {
+        const events = await api("/api/events?" + params.toString());
+        renderLogs(events);
+    } catch (e) {
+        console.error("Failed to load logs:", e);
+    }
+}
+
+function renderLogs(events) {
+    const tbody = document.getElementById("logs-body");
+    if (events.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No scan events match these filters</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = events.map(e => `
+        <tr class="log-row" onclick="openEventModal(${e.id})">
+            <td><span class="status-badge ${e.status}">${e.status}</span></td>
+            <td><span class="log-type-pill">${e.scan_type}</span></td>
+            <td>${esc(e.target || "-")}</td>
+            <td>${e.hosts_found ?? 0}</td>
+            <td>${e.new_devices ?? 0}</td>
+            <td>${formatDuration(e.duration_ms)}</td>
+            <td>${formatDate(e.started_at)}</td>
+            <td class="log-message" title="${esc(e.message || "")}">${esc(truncate(e.message, 80))}</td>
+        </tr>
+    `).join("");
+}
+
+function filterLogs(status, btn) {
+    currentLogStatus = status;
+    document.querySelectorAll(".log-filter-btn").forEach(b => b.classList.remove("active"));
+    if (btn) btn.classList.add("active");
+    loadLogs();
+}
+
+function filterLogType(type, btn) {
+    currentLogType = type;
+    document.querySelectorAll(".log-type-btn").forEach(b => b.classList.remove("active"));
+    if (btn) btn.classList.add("active");
+    loadLogs();
+}
+
+async function clearLogs() {
+    if (!confirm("Delete all scan event logs?")) return;
+    try {
+        await api("/api/events", { method: "DELETE" });
+        loadLogs();
+        showScanStatus("Logs cleared", 2000);
+    } catch (e) {
+        showScanStatus("Failed to clear: " + e.message, 3000);
+    }
+}
+
+async function openEventModal(eventId) {
+    try {
+        const e = await api(`/api/events/${eventId}`);
+        const body = document.getElementById("event-modal-body");
+        const title = document.getElementById("event-modal-title");
+
+        title.textContent = `${e.scan_type.toUpperCase()} scan — ${e.status}`;
+
+        const isError = e.status === "failed";
+        const messageHtml = isError
+            ? `<pre class="traceback">${esc(e.message || "")}</pre>`
+            : `<div style="color: var(--text); font-size: 0.9rem;">${esc(e.message || "-")}</div>`;
+
+        body.innerHTML = `
+            <div class="detail-grid">
+                <div class="detail-item">
+                    <label>Status</label>
+                    <span><span class="status-badge ${e.status}">${e.status}</span></span>
+                </div>
+                <div class="detail-item">
+                    <label>Type</label>
+                    <span>${e.scan_type}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Target</label>
+                    <span>${esc(e.target || "-")}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Duration</label>
+                    <span>${formatDuration(e.duration_ms)}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Hosts Found</label>
+                    <span>${e.hosts_found ?? 0}</span>
+                </div>
+                <div class="detail-item">
+                    <label>New Devices</label>
+                    <span>${e.new_devices ?? 0}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Started</label>
+                    <span>${formatDate(e.started_at)}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Finished</label>
+                    <span>${formatDate(e.finished_at)}</span>
+                </div>
+                <div class="detail-item detail-full">
+                    <label>${isError ? "Error / Traceback" : "Message"}</label>
+                    ${messageHtml}
+                </div>
+            </div>
+        `;
+
+        document.getElementById("event-modal-overlay").classList.remove("hidden");
+    } catch (err) {
+        console.error("Failed to load event:", err);
+    }
+}
+
+function closeEventModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    document.getElementById("event-modal-overlay").classList.add("hidden");
+}
+
+function truncate(str, n) {
+    if (!str) return "";
+    return str.length > n ? str.slice(0, n) + "…" : str;
+}
+
+function formatDuration(ms) {
+    if (ms == null) return "-";
+    if (ms < 1000) return `${ms} ms`;
+    const s = (ms / 1000).toFixed(1);
+    if (ms < 60000) return `${s} s`;
+    const m = Math.floor(ms / 60000);
+    const rem = ((ms % 60000) / 1000).toFixed(0);
+    return `${m}m ${rem}s`;
+}

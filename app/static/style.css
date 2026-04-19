@@ -123,6 +123,137 @@ header {
 .stat-online .stat-value { color: var(--success); }
 .stat-offline .stat-value { color: var(--danger); }
 
+/* Tabs */
+.tabs-bar {
+    padding: 0 2rem;
+    display: flex;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 1rem;
+}
+
+.tab-btn {
+    padding: 0.7rem 1.5rem;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.tab-btn:hover { color: var(--text); }
+
+.tab-btn.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+.tab-content { animation: fadeIn 0.2s; }
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Log filter buttons */
+.log-filter-btn, .log-type-btn {
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.2s;
+}
+
+.log-filter-btn:hover, .log-type-btn:hover {
+    border-color: var(--primary);
+    color: var(--text);
+}
+
+.log-filter-btn.active, .log-type-btn.active {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+}
+
+/* Status badges for logs */
+.status-badge {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.status-badge.success {
+    background: rgba(0, 184, 148, 0.15);
+    color: var(--success);
+    border: 1px solid var(--success);
+}
+
+.status-badge.failed {
+    background: rgba(225, 112, 85, 0.15);
+    color: var(--danger);
+    border: 1px solid var(--danger);
+}
+
+.status-badge.partial {
+    background: rgba(253, 203, 110, 0.15);
+    color: var(--warning);
+    border: 1px solid var(--warning);
+}
+
+.log-row {
+    cursor: pointer;
+}
+
+.log-row:hover {
+    background: var(--surface-hover);
+}
+
+.log-message {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.log-type-pill {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+    background: var(--surface-hover);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+}
+
+/* Traceback display */
+.traceback {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.75rem;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 400px;
+    overflow-y: auto;
+    color: var(--danger);
+    margin-top: 0.5rem;
+}
+
 /* Filter Bar */
 .filter-bar {
     padding: 0 2rem;

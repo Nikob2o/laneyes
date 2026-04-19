@@ -69,3 +69,36 @@ class ScanRecord(db.Model):
             "scan_time": self.scan_time.isoformat() if self.scan_time else None,
             "scan_type": self.scan_type,
         }
+
+
+class ScanEvent(db.Model):
+    """Event log for each scan attempt (start/end, status, errors)."""
+
+    __tablename__ = "scan_events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    scan_type = db.Column(db.String(50), index=True)  # "quick", "deep"
+    target = db.Column(db.String(100))  # network CIDR or single IP
+    status = db.Column(db.String(20), index=True)  # "success", "failed", "partial"
+    message = db.Column(db.Text)  # summary or error message
+    hosts_found = db.Column(db.Integer, default=0)
+    new_devices = db.Column(db.Integer, default=0)
+    started_at = db.Column(
+        db.DateTime, default=lambda: datetime.now(timezone.utc), index=True
+    )
+    finished_at = db.Column(db.DateTime)
+    duration_ms = db.Column(db.Integer)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "scan_type": self.scan_type,
+            "target": self.target,
+            "status": self.status,
+            "message": self.message,
+            "hosts_found": self.hosts_found,
+            "new_devices": self.new_devices,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "finished_at": self.finished_at.isoformat() if self.finished_at else None,
+            "duration_ms": self.duration_ms,
+        }

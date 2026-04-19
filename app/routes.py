@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, render_template, request
 
 from app import db
-from app.models import Device, ScanRecord
+from app.models import Device, ScanRecord, ScanEvent
 from app.scanner import quick_scan, deep_scan
 from config import Config
 
@@ -118,3 +118,35 @@ def api_stats():
         "offline": offline,
         "total_scans": scans,
     })
+
+
+# --- API: Scan Events (logs) ---
+
+
+@main.route("/api/events")
+def api_events():
+    scan_type = request.args.get("type")  # quick, deep
+    status = request.args.get("status")  # success, failed, partial
+    limit = request.args.get("limit", 200, type=int)
+
+    query = ScanEvent.query
+    if scan_type in ("quick", "deep"):
+        query = query.filter_by(scan_type=scan_type)
+    if status in ("success", "failed", "partial"):
+        query = query.filter_by(status=status)
+
+    events = query.order_by(ScanEvent.started_at.desc()).limit(limit).all()
+    return jsonify([e.to_dict() for e in events])
+
+
+@main.route("/api/events/<int:event_id>")
+def api_event_detail(event_id):
+    event = db.get_or_404(ScanEvent, event_id)
+    return jsonify(event.to_dict())
+
+
+@main.route("/api/events", methods=["DELETE"])
+def api_events_clear():
+    ScanEvent.query.delete()
+    db.session.commit()
+    return jsonify({"status": "cleared"})
