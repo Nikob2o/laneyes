@@ -45,8 +45,12 @@ async function loadDashboard() {
 
 function renderDashboardStats(s) {
     document.getElementById("dash-total").textContent = s.total_devices;
-    document.getElementById("dash-online-pct").textContent = `${s.online_percent}% online`;
     document.getElementById("dash-online").textContent = s.online;
+    const pctEl = document.getElementById("dash-online-pct");
+    pctEl.textContent = s.total_devices ? `${s.online_percent}%` : "";
+    pctEl.style.color = s.online_percent >= 80 ? "var(--success)"
+        : s.online_percent >= 50 ? "var(--warning, #fdcb6e)"
+        : "var(--danger)";
     document.getElementById("dash-new").textContent = s.new_this_week;
     document.getElementById("dash-unnamed").textContent = s.unnamed;
 
@@ -69,22 +73,36 @@ function renderTimelineChart(timeline) {
     destroyChart("timeline");
     const ctx = document.getElementById("chart-timeline");
     if (!ctx) return;
-    const labels = timeline.map(p => new Date(p.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }));
-    const data = timeline.map(p => p.hosts);
+
+    // Fill gaps: ensure all 7 days have an entry (0 if no scan)
+    const byDate = Object.fromEntries(timeline.map(p => [p.date, p.hosts]));
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const key = d.toISOString().slice(0, 10);
+        days.push({
+            label: d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }),
+            value: byDate[key] || 0,
+        });
+    }
+
     charts.timeline = new Chart(ctx, {
         type: "line",
         data: {
-            labels,
+            labels: days.map(d => d.label),
             datasets: [{
                 label: "Hosts found",
-                data,
+                data: days.map(d => d.value),
                 borderColor: "#6c5ce7",
                 backgroundColor: "rgba(108, 92, 231, 0.15)",
                 fill: true,
                 tension: 0.3,
                 pointBackgroundColor: "#6c5ce7",
                 pointBorderColor: "#fff",
-                pointRadius: 4,
+                pointRadius: 5,
+                pointHoverRadius: 7,
+                spanGaps: true,
             }],
         },
         options: chartBaseOptions({ showY: true }),
@@ -95,10 +113,14 @@ function renderVendorsChart(vendors) {
     destroyChart("vendors");
     const ctx = document.getElementById("chart-vendors");
     if (!ctx) return;
+    if (!vendors.length) {
+        ctx.parentElement.innerHTML = '<p class="widget-empty" style="margin-top:4rem;">No vendor data yet</p>';
+        return;
+    }
     charts.vendors = new Chart(ctx, {
         type: "bar",
         data: {
-            labels: vendors.map(v => v.name.length > 20 ? v.name.slice(0, 20) + "…" : v.name),
+            labels: vendors.map(v => v.name.length > 22 ? v.name.slice(0, 22) + "…" : v.name),
             datasets: [{
                 data: vendors.map(v => v.count),
                 backgroundColor: CHART_COLORS,
@@ -106,8 +128,24 @@ function renderVendorsChart(vendors) {
             }],
         },
         options: {
-            ...chartBaseOptions({ showY: false, noLegend: true }),
+            responsive: true,
+            maintainAspectRatio: false,
             indexAxis: "y",
+            plugins: {
+                legend: { display: false },
+                tooltip: { backgroundColor: "#1a1d27", borderColor: "#2a2d3a", borderWidth: 1 },
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    ticks: { color: "#8b8fa3", font: { size: 11 }, precision: 0, stepSize: 1 },
+                    grid: { color: "rgba(138, 143, 163, 0.08)" },
+                },
+                y: {
+                    ticks: { color: "#cfd3e0", font: { size: 12 }, autoSkip: false },
+                    grid: { display: false },
+                },
+            },
         },
     });
 }
