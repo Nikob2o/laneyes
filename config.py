@@ -14,3 +14,7 @@ class Config:
     # Network settings
     NETWORK_CIDR = os.environ.get("NETWORK_CIDR", "192.168.1.0/24")
     SCAN_TIMEOUT = int(os.environ.get("SCAN_TIMEOUT", "30"))
+    # Auto quick scan (set to 0 to disable)
+    AUTO_SCAN_MINUTES = int(os.environ.get("AUTO_SCAN_MINUTES", "15"))
+    # Auto deep scan (set to 0 to disable)
+    DEEP_SCAN_HOURS = int(os.environ.get("DEEP_SCAN_HOURS", "24"))
