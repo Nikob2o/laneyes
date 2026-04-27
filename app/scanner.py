@@ -87,18 +87,18 @@ def _get_local_info() -> dict | None:
 def _discover_hosts(network_cidr: str) -> list[dict]:
     """
     Multi-method host discovery to maximize detection:
-    1. nmap ARP ping scan (-PR -sn) — catches most LAN devices including iPhones
-    2. nmap standard ping scan (-sn) — catches devices that respond to ICMP/TCP
-    3. ARP table — catches anything we've communicated with recently
-    4. Local machine — always included
+    1. nmap combined ping scan (ARP + ICMP + TCP) — catches most LAN devices
+    2. ARP table — catches anything we've communicated with recently
+    3. Local machine — always included
     Returns deduplicated list of {ip, mac} dicts.
     """
     seen = {}  # mac -> {ip, mac}
 
-    # Method 1: ARP-only scan (best for LAN, catches Apple devices)
+    # Method 1: combined ARP + ICMP + TCP probes in a single nmap invocation
+    # (was previously two separate scans, which doubled RAM/CPU on small nodes)
     try:
         nm = nmap.PortScanner()
-        nm.scan(hosts=network_cidr, arguments="-sn -PR --send-eth")
+        nm.scan(hosts=network_cidr, arguments="-sn -PR -PE -PP -PA80,443 --send-eth -T4")
         for host in nm.all_hosts():
             addr = nm[host].get("addresses", {})
             ip = addr.get("ipv4", host)
@@ -108,20 +108,7 @@ def _discover_hosts(network_cidr: str) -> list[dict]:
     except Exception:
         pass
 
-    # Method 2: Standard ping scan with multiple probe types
-    try:
-        nm = nmap.PortScanner()
-        nm.scan(hosts=network_cidr, arguments="-sn -PE -PP -PA80,443 -T4")
-        for host in nm.all_hosts():
-            addr = nm[host].get("addresses", {})
-            ip = addr.get("ipv4", host)
-            mac = addr.get("mac", "").upper()
-            if mac and mac not in seen:
-                seen[mac] = {"ip": ip, "mac": mac}
-    except Exception:
-        pass
-
-    # Method 3: Parse ARP table (catches anything from recent traffic)
+    # Method 2: Parse ARP table (catches anything from recent traffic)
     try:
         output = subprocess.check_output(["ip", "neigh"], text=True, timeout=5)
         for line in output.strip().splitlines():
@@ -138,7 +125,7 @@ def _discover_hosts(network_cidr: str) -> list[dict]:
     except Exception:
         pass
 
-    # Method 4: Add the local machine itself
+    # Method 3: Add the local machine itself
     local = _get_local_info()
     if local and local["mac"] not in seen:
         seen[local["mac"]] = local
