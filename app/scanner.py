@@ -1,10 +1,14 @@
 import json
+import os
 import socket
 import subprocess
+import sys
+import threading
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import nmap
+from flask import current_app
 
 from app import db
 from app.models import Device, ScanRecord, ScanEvent
@@ -31,11 +35,36 @@ def _record_event(scan_type, target, started_at, status, message,
     return event
 
 
+# OUI prefix -> vendor table, loaded once per process.
+# MacLookup() re-reads and re-parses the whole vendor file (~35k entries)
+# on every instance: with one instance per host per quick scan, that was
+# ~300 full reloads an hour, churning memory that never went back to the OS.
+_vendor_prefixes = None
+_vendor_lock = threading.Lock()
+
+
+def _load_vendor_prefixes() -> dict:
+    global _vendor_prefixes
+    with _vendor_lock:
+        if _vendor_prefixes is None:
+            try:
+                from mac_vendor_lookup import MacLookup
+                lookup = MacLookup()
+                lookup.load_vendors()
+                _vendor_prefixes = lookup.async_lookup.prefixes or {}
+            except Exception:
+                # Retry on the next call rather than caching a failure
+                return {}
+        return _vendor_prefixes
+
+
 def _get_mac_vendor(mac: str) -> str:
-    """Try to resolve MAC vendor using mac-vendor-lookup."""
+    """Resolve MAC vendor from the OUI table (loaded once)."""
     try:
-        from mac_vendor_lookup import MacLookup
-        return MacLookup().lookup(mac)
+        from mac_vendor_lookup import BaseMacLookup
+        prefix = BaseMacLookup.sanitise(mac)[:6].encode("utf8")
+        vendor = _load_vendor_prefixes().get(prefix)
+        return vendor.decode("utf8") if vendor else ""
     except Exception:
         return ""
 
@@ -206,27 +235,63 @@ def _quick_scan_impl(network_cidr: str) -> dict:
     }
 
 
+_DEEP_WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deep_worker.py")
+
+
+def _run_deep_worker(target: str) -> list[dict]:
+    """
+    Run nmap -O -sV in a separate Python process and return its parsed hosts.
+    A /24 deep scan is the memory peak of the app (nmap + its XML output +
+    python-nmap's parse). In a child process that memory is returned to the
+    OS on exit, and the child marks itself as the OOM killer's first choice,
+    so an OOM during the scan kills the scan, not the web app.
+    """
+    timeout = current_app.config.get("DEEP_SCAN_TIMEOUT", 1800)
+    proc = subprocess.run(
+        # Run by path, not "-m app...": no Flask/SQLAlchemy import in the child
+        [sys.executable, _DEEP_WORKER, target],
+        capture_output=True, text=True, timeout=timeout,
+    )
+    if proc.returncode != 0:
+        hint = " (killed: out of memory?)" if proc.returncode == -9 else ""
+        raise RuntimeError(
+            f"deep scan worker exited with {proc.returncode}{hint}: "
+            f"{proc.stderr.strip()[-500:]}"
+        )
+    return json.loads(proc.stdout)
+
+
+def purge_old_scan_records(retention_days: int) -> int:
+    """
+    Delete ScanRecord rows older than retention_days; return how many.
+    Every quick scan adds one row per host seen, and nothing ever removed
+    them (~700k rows after 7 months). The UI only reads the latest 100-200.
+    """
+    if retention_days <= 0:
+        return 0
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    # Bulk SQL DELETE: rows are never loaded into Python
+    deleted = (
+        ScanRecord.query.filter(ScanRecord.scan_time < cutoff)
+        .delete(synchronize_session=False)
+    )
+    db.session.commit()
+    return deleted
+
+
 def _deep_scan_impl(network_cidr: str, target_ip: str | None = None) -> dict:
     """
     Deep scan: OS detection + port scan on a single target or whole network.
     Requires root/sudo for OS detection.
     """
     scan_time = datetime.now(timezone.utc)
-    nm = nmap.PortScanner()
-
     target = target_ip or network_cidr
-    try:
-        nm.scan(hosts=target, arguments="-O -sV --top-ports 100 -T4")
-    except nmap.PortScannerError:
-        # OS detection requires root; fall back to service scan only
-        nm.scan(hosts=target, arguments="-sV --top-ports 100 -T4")
 
     devices_updated = []
 
-    for host in nm.all_hosts():
-        addr = nm[host].get("addresses", {})
-        ip = addr.get("ipv4", host)
-        mac = addr.get("mac", "").upper()
+    for host in _run_deep_worker(target):
+        ip = host["ip"]
+        mac = host["mac"]
 
         # Try to find device by MAC first, then by IP
         device = None
@@ -237,26 +302,10 @@ def _deep_scan_impl(network_cidr: str, target_ip: str | None = None) -> dict:
         if device is None:
             continue
 
-        # OS info
-        os_matches = nm[host].get("osmatch", [])
-        if os_matches:
-            best = os_matches[0]
-            device.os_info = f"{best.get('name', '')} ({best.get('accuracy', '')}%)"
-
-        # Open ports
-        ports_info = []
-        for proto in nm[host].all_protocols():
-            for port in sorted(nm[host][proto].keys()):
-                svc = nm[host][proto][port]
-                ports_info.append({
-                    "port": port,
-                    "protocol": proto,
-                    "state": svc.get("state", ""),
-                    "service": svc.get("name", ""),
-                    "version": svc.get("version", ""),
-                })
-        if ports_info:
-            device.open_ports = json.dumps(ports_info)
+        if host["os_info"]:
+            device.os_info = host["os_info"]
+        if host["ports"]:
+            device.open_ports = json.dumps(host["ports"])
 
         device.last_seen = scan_time
         device.is_online = True

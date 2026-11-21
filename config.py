@@ -18,3 +18,7 @@ class Config:
     AUTO_SCAN_MINUTES = int(os.environ.get("AUTO_SCAN_MINUTES", "15"))
     # Auto deep scan (set to 0 to disable)
     DEEP_SCAN_HOURS = int(os.environ.get("DEEP_SCAN_HOURS", "24"))
+    # Kill a deep scan running longer than this (seconds); a /24 takes ~3 min
+    DEEP_SCAN_TIMEOUT = int(os.environ.get("DEEP_SCAN_TIMEOUT", "1800"))
+    # Scan history kept, in days (set to 0 to keep everything)
+    SCAN_RECORD_RETENTION_DAYS = int(os.environ.get("SCAN_RECORD_RETENTION_DAYS", "30"))

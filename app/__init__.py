@@ -1,5 +1,6 @@
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
@@ -38,7 +39,7 @@ def _start_scheduler(app):
 
     from apscheduler.schedulers.background import BackgroundScheduler
 
-    from app.scanner import deep_scan, quick_scan
+    from app.scanner import deep_scan, purge_old_scan_records, quick_scan
 
     def quick_job():
         with app.app_context():
@@ -54,7 +55,24 @@ def _start_scheduler(app):
             except Exception as e:
                 logger.error("Auto deep scan failed: %s", e)
 
+    def purge_job():
+        with app.app_context():
+            try:
+                deleted = purge_old_scan_records(app.config["SCAN_RECORD_RETENTION_DAYS"])
+                logger.info("Purged %d old scan records", deleted)
+            except Exception as e:
+                db.session.rollback()
+                logger.error("Scan record purge failed: %s", e)
+
     scheduler = BackgroundScheduler(daemon=True, timezone="UTC")
+
+    if app.config.get("SCAN_RECORD_RETENTION_DAYS", 0) > 0:
+        # First run shortly after startup, then daily
+        scheduler.add_job(
+            purge_job, "interval", hours=24,
+            next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
+            id="purge-scan-records", max_instances=1, coalesce=True,
+        )
 
     if quick_minutes > 0:
         scheduler.add_job(
