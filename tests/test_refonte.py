@@ -154,3 +154,15 @@ def test_page_en_francais_sans_violet_ni_emoji_ni_chartjs(client):
     assert emojis == []
     # L'interface n'efface jamais un appareil : elle archive.
     assert 'method: "DELETE"' not in (STATIQUE / "app.js").read_text()
+
+
+def test_polices_hebergees_sans_appel_exterieur(client):
+    """Outil du LAN : Geist et Geist Mono servies par l'application, licence jointe."""
+    page = client.get("/").get_data(as_text=True)
+    assert "fonts.googleapis" not in page and "fonts.gstatic" not in page
+    css = (STATIQUE / "style.css").read_text()
+    assert 'url("polices/geist.woff2")' in css and 'url("polices/geist-mono.woff2")' in css
+    for f in ("geist.woff2", "geist-mono.woff2"):
+        r = client.get(f"/static/polices/{f}")
+        assert r.status_code == 200 and r.data[:4] == b"wOF2"
+    assert "Open Font License" in (STATIQUE / "polices" / "LICENCE.txt").read_text()

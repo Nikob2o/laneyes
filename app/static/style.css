@@ -2,6 +2,13 @@
    Graphite neutre, un seul accent bleu ciel pour les actions ; le vert ne dit que « en ligne »,
    le rouge que « échec ». Geist pour l'interface, Geist Mono pour IP, MAC, durées et compteurs. */
 
+/* Polices auto-hébergées (Geist 1.9.2, Vercel, licence OFL : polices/LICENCE.txt) :
+   outil du LAN, aucun appel extérieur. */
+@font-face { font-family: "Geist"; src: url("polices/geist.woff2") format("woff2");
+    font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "Geist Mono"; src: url("polices/geist-mono.woff2") format("woff2");
+    font-weight: 100 900; font-display: swap; }
+
 :root {
     --fond: #141415;
     --barre: #0f0f10;
@@ -165,6 +172,9 @@ h2 { margin: 0; font-size: 16px; font-weight: 500; }
 .courbe-ligne { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .courbe-aire { fill: rgba(122, 167, 255, 0.10); }
 .courbe-point { fill: var(--accent); }
+.courbe-en-cours { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 5; stroke-linecap: round; opacity: 0.7; }
+.courbe-point-en-cours { fill: var(--carte); stroke: var(--accent); stroke-width: 2; }
+.courbe-legende { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 12px; color: var(--texte-2); }
 
 .liste { list-style: none; margin: 0; padding: 0; }
 .ligne-liste { display: flex; align-items: center; gap: 12px; min-height: 48px; border-top: 1px solid var(--filet); }

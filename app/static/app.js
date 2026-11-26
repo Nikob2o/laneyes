@@ -229,6 +229,13 @@ async function chargerEnsemble() {
         </tr>`).join("") : `<tr><td colspan="5" class="vide">Aucun appareil en ligne. Lancez un scan rapide.</td></tr>`;
 }
 
+function dateJM(iso) {
+    return `${iso.slice(8)}/${iso.slice(5, 7)}`;
+}
+
+// Le dernier point est la journée en cours : tracé en pointillé, et jamais pris comme
+// référence (son maximum n'est pas encore atteint). La comparaison se fait sur la
+// dernière journée complète.
 function dessinerCourbe(points) {
     const conteneur = $("#courbe");
     const valeurs = points.map((p) => p.hosts);
@@ -240,22 +247,24 @@ function dessinerCourbe(points) {
     }
     // Largeur réelle du conteneur : les graduations gardent 11 px, même sur téléphone.
     const L = Math.max(300, Math.round(conteneur.clientWidth || 760)), H = L < 500 ? 200 : 250;
-    const g = 40, d = 12, h = 16, b = 30;
+    const g = 40, d = L < 500 ? 24 : 16, h = 24, b = 30;
     let min = Math.min(...connues), max = Math.max(...connues);
     const pas = Math.max(1, Math.ceil((max - min + 2) / 4 / 5) * 5);
     min = Math.max(0, Math.floor((min - 1) / pas) * pas);
     max = min + pas * 4;
     const x = (i) => g + (i * (L - g - d)) / (points.length - 1);
     const y = (v) => h + ((max - v) * (H - h - b)) / (max - min);
+    const iJour = points.length - 1;
 
     const grille = [0, 1, 2, 3, 4].map((k) => {
         const v = min + k * pas;
         return `<line x1="${g}" y1="${y(v)}" x2="${L - d}" y2="${y(v)}"/><text x="${g - 10}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
     }).join("");
-    // Une journée sans scan coupe la courbe plutôt que d'inventer une valeur.
+
+    // Journées complètes : trait plein ; une journée sans scan coupe la courbe.
     const segments = [];
     let courant = [];
-    points.forEach((p, i) => {
+    points.slice(0, iJour).forEach((p, i) => {
         if (p.hosts == null) { if (courant.length) segments.push(courant); courant = []; }
         else courant.push([x(i), y(p.hosts)]);
     });
@@ -265,23 +274,44 @@ function dessinerCourbe(points) {
         const aire = seg.length > 1 ? `<polygon class="courbe-aire" points="${pts} ${seg[seg.length - 1][0]},${H - b} ${seg[0][0]},${H - b}"/>` : "";
         return `${aire}<polyline class="courbe-ligne" points="${pts}"/>`;
     }).join("");
-    const dernierIndex = valeurs.map((v, i) => (v != null ? i : -1)).filter((i) => i >= 0).pop();
+
+    // Journée en cours : pointillé depuis la veille, point creux et libellé.
+    const jour = points[iJour];
+    let enCours = "";
+    if (jour.hosts != null) {
+        const veille = points[iJour - 1];
+        const depart = veille && veille.hosts != null ? `<line class="courbe-en-cours" x1="${x(iJour - 1)}" y1="${y(veille.hosts)}" x2="${x(iJour)}" y2="${y(jour.hosts)}"/>` : "";
+        enCours = `${depart}<circle class="courbe-point-en-cours" cx="${x(iJour)}" cy="${y(jour.hosts)}" r="4"/>`;
+    }
+
+    // Dernier point d'une journée complète, mis en avant.
+    const complets = points.slice(0, iJour).map((p, i) => ({ ...p, i })).filter((p) => p.hosts != null);
+    const premier = complets[0];
+    const dernier = complets[complets.length - 1];
+    const pointPlein = dernier ? `<circle class="courbe-point" cx="${x(dernier.i)}" cy="${y(dernier.hosts)}" r="4"/>` : "";
+
     const etiquettes = points.map((p, i) => {
-        const [, mois, jour] = p.date.split("-");
-        const texte = i === 0 ? `${jour}/${mois}` : jour;
-        if (L < 500 && i % 2 && i !== points.length - 1) return "";
-        return `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${texte}</text>`;
+        const [, mois, j] = p.date.split("-");
+        if (L < 500 && i % 2 && i !== iJour) return "";
+        return `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${i === 0 ? `${j}/${mois}` : j}</text>`;
     }).join("");
-    const premier = points.find((p) => p.hosts != null);
-    const dernier = points[dernierIndex];
-    const resume = `Maximum d'appareils en ligne par jour : ${premier.hosts} le ${premier.date.slice(8)}/${premier.date.slice(5, 7)}, ${dernier.hosts} le ${dernier.date.slice(8)}/${dernier.date.slice(5, 7)}`;
-    conteneur.innerHTML = `<svg class="courbe" viewBox="0 0 ${L} ${H}" role="img" aria-label="${esc(resume)}">
-        <g class="courbe-grille">${grille}</g>${traces}
-        <circle class="courbe-point" cx="${x(dernierIndex)}" cy="${y(dernier.hosts)}" r="4"/>
-        <g class="courbe-axe">${etiquettes}</g></svg>`;
-    const ecart = dernier.hosts - premier.hosts;
-    $("#courbe-ecart").textContent = premier === dernier ? "" :
-        `${ecart > 0 ? "+" : ecart < 0 ? "−" : "±"}${Math.abs(ecart)} depuis le ${premier.date.slice(8)}/${premier.date.slice(5, 7)}`;
+
+    const morceaux = [];
+    if (premier) morceaux.push(`${premier.hosts} le ${dateJM(premier.date)}`);
+    if (dernier && dernier !== premier) morceaux.push(`${dernier.hosts} le ${dateJM(dernier.date)}`);
+    if (jour.hosts != null) morceaux.push(`${jour.hosts} aujourd'hui, journée en cours`);
+    conteneur.innerHTML = `<svg class="courbe" viewBox="0 0 ${L} ${H}" role="img" aria-label="${esc("Maximum d'appareils en ligne par jour : " + morceaux.join(", "))}">
+        <g class="courbe-grille">${grille}</g>${traces}${enCours}${pointPlein}
+        <g class="courbe-axe">${etiquettes}</g></svg>
+        ${jour.hosts != null ? `<p class="courbe-legende"><svg aria-hidden="true" width="24" height="8"><line class="courbe-en-cours" x1="2" y1="4" x2="22" y2="4"/></svg>Aujourd'hui, en cours : ${jour.hosts} pour l'instant</p>` : ""}`;
+
+    if (premier && dernier && dernier !== premier) {
+        const ecart = dernier.hosts - premier.hosts;
+        $("#courbe-ecart").textContent =
+            `${ecart > 0 ? "+" : ecart < 0 ? "−" : "±"}${Math.abs(ecart)} du ${dateJM(premier.date)} au ${dateJM(dernier.date)}`;
+    } else {
+        $("#courbe-ecart").textContent = "";
+    }
 }
 
 // --- Appareils ------------------------------------------------------------
