@@ -24,6 +24,10 @@ class Device(db.Model):
     )
     is_online = db.Column(db.Boolean, default=True)
     notes = db.Column(db.Text)
+    # Archivé : masqué des listes, jamais supprimé. Un appareil archivé qui revient sur le
+    # réseau (last_seen > archived_at) réapparaît de lui-même, sans toucher au scanner.
+    archived = db.Column(db.Boolean, nullable=False, default=False, server_default="0")
+    archived_at = db.Column(db.DateTime)
 
     scans = db.relationship("ScanRecord", backref="device", lazy="dynamic")
 
@@ -45,6 +49,8 @@ class Device(db.Model):
             "last_seen": self.last_seen.isoformat() if self.last_seen else None,
             "is_online": self.is_online,
             "notes": self.notes,
+            "archived": bool(self.archived),
+            "archived_at": self.archived_at.isoformat() if self.archived_at else None,
         }
 
 

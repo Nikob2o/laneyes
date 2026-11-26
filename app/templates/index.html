@@ -1,205 +1,188 @@
+{%- macro icone(nom, taille=16) -%}
+<svg class="icone" aria-hidden="true" width="{{ taille }}" height="{{ taille }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+{%- if nom == 'oeil' -%}<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>
+{%- elif nom == 'ensemble' -%}<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>
+{%- elif nom == 'appareils' -%}<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>
+{%- elif nom == 'etiquette' -%}<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5"/>
+{%- elif nom == 'journal' -%}<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>
+{%- elif nom == 'recherche' -%}<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+{%- elif nom == 'fermer' -%}<path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+{%- endif -%}
+</svg>
+{%- endmacro -%}
 <!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LanEyes - Network Monitor</title>
+    <title>Laneyes</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo.svg') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
-    <header>
-        <div class="header-content">
-            <h1>
-                <img src="{{ url_for('static', filename='logo.svg') }}" alt="LanEyes" class="logo-img">
-                LanEyes
-            </h1>
-            <p class="subtitle">Network Monitor</p>
+<div class="cadre">
+    <aside class="barre">
+      <div class="barre-interieur">
+        <a class="marque" href="#/">{{ icone('oeil', 22) }}<span>Laneyes</span></a>
+        <nav class="nav" aria-label="Navigation">
+            <a href="#/" data-vue="ensemble">{{ icone('ensemble') }}<span class="nav-nom">Vue d'ensemble</span></a>
+            <a href="#/appareils" data-vue="appareils">{{ icone('appareils') }}<span class="nav-nom">Appareils</span><span class="nav-compte" id="compte-appareils"></span></a>
+            <a href="#/a-identifier" data-vue="a-identifier">{{ icone('etiquette') }}<span class="nav-nom">À identifier</span><span class="nav-compte" id="compte-a-identifier"></span></a>
+            <a href="#/journal" data-vue="journal">{{ icone('journal') }}<span class="nav-nom">Journal des scans</span></a>
+        </nav>
+        <div class="encart">
+            <span class="petit">Réseau surveillé</span>
+            <span class="mono">{{ reseau }}</span>
+            <span class="petit">{% if cadence_rapide %}Scan rapide toutes les {{ cadence_rapide }} min{% else %}Scan rapide manuel{% endif %}</span>
         </div>
-        <div class="header-actions">
-            <button id="btn-quick-scan" class="btn btn-primary" onclick="quickScan()">
-                <span class="btn-icon">&#9889;</span> Quick Scan
-            </button>
-            <button id="btn-deep-scan" class="btn btn-secondary" onclick="deepScanAll()">
-                <span class="btn-icon">&#128269;</span> Deep Scan
-            </button>
-        </div>
-    </header>
+      </div>
+    </aside>
 
-    <main>
-        <!-- Tabs -->
-        <section class="tabs-bar">
-            <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard', this)">Dashboard</button>
-            <button class="tab-btn" data-tab="devices" onclick="switchTab('devices', this)">Devices</button>
-            <button class="tab-btn" data-tab="logs" onclick="switchTab('logs', this)">Logs</button>
+    <main class="contenu">
+        <!-- Vue d'ensemble -->
+        <section class="vue" id="vue-ensemble" hidden>
+            <header class="entete">
+                <div class="entete-titre">
+                    <h1>Vue d'ensemble</h1>
+                    <span class="etat-scan" id="etat-scan"></span>
+                </div>
+                <div class="actions">
+                    <label class="recherche">{{ icone('recherche') }}<input type="search" placeholder="Nom, IP ou MAC" aria-label="Rechercher un appareil" data-recherche-globale></label>
+                    <button class="btn btn-secondaire" type="button" data-scan="deep">Scan approfondi</button>
+                    <button class="btn btn-primaire" type="button" data-scan="quick">Scan rapide</button>
+                </div>
+            </header>
+
+            <div class="chiffres">
+                <div class="carte chiffre"><span class="chiffre-titre">En ligne</span><span class="chiffre-valeur" id="ch-enligne">–</span><span class="chiffre-pied" id="ch-enligne-pied"></span></div>
+                <div class="carte chiffre"><span class="chiffre-titre">Nouveaux cette semaine</span><span class="chiffre-valeur" id="ch-nouveaux">–</span><span class="chiffre-pied" id="ch-nouveaux-pied"></span></div>
+                <div class="carte chiffre"><span class="chiffre-titre">À identifier</span><span class="chiffre-valeur" id="ch-a-identifier">–</span><a class="chiffre-pied lien" href="#/a-identifier">Nommer les appareils</a></div>
+                <div class="carte chiffre"><span class="chiffre-titre">Fantômes</span><span class="chiffre-valeur" id="ch-fantomes">–</span><span class="chiffre-pied">hors ligne depuis plus de 7 j · <button class="lien" type="button" data-archiver-fantomes>Archiver</button></span></div>
+            </div>
+
+            <div class="rangee-cartes">
+                <div class="carte courbe-carte">
+                    <div class="carte-tete"><h2>Appareils en ligne, 7 derniers jours</h2><span class="discret" id="courbe-ecart"></span></div>
+                    <div id="courbe"></div>
+                </div>
+                <div class="carte nouveaux-carte">
+                    <div class="carte-tete"><h2>Nouveaux cette semaine</h2><a class="lien" href="#/appareils">Tout voir</a></div>
+                    <ul class="liste" id="liste-nouveaux"></ul>
+                </div>
+            </div>
+
+            <div class="carte">
+                <div class="carte-tete"><h2>En ligne maintenant</h2><a class="lien" href="#/appareils" id="lien-enligne">Tous les appareils en ligne</a></div>
+                <div class="defile">
+                    <table class="tableau">
+                        <thead><tr><th>Appareil</th><th>IP</th><th>MAC</th><th>Fabricant</th><th>Connu depuis</th></tr></thead>
+                        <tbody id="corps-enligne"></tbody>
+                    </table>
+                </div>
+            </div>
         </section>
 
-        <!-- Dashboard Tab -->
-        <div id="tab-dashboard" class="tab-content">
-            <!-- Stat cards -->
-            <section class="dash-stats">
-                <div class="stat-card">
-                    <span class="stat-value" id="dash-total">-</span>
-                    <span class="stat-label">Total devices</span>
+        <!-- Appareils et À identifier -->
+        <section class="vue" id="vue-appareils" hidden>
+            <header class="entete">
+                <h1 id="titre-appareils">Appareils</h1>
+                <div class="actions">
+                    <button class="btn btn-primaire" type="button" data-scan="quick">Scan rapide</button>
                 </div>
-                <div class="stat-card stat-online">
-                    <div class="stat-row">
-                        <span class="stat-value" id="dash-online">-</span>
-                        <span class="stat-trend" id="dash-online-pct">-</span>
-                    </div>
-                    <span class="stat-label">Online now</span>
+            </header>
+            <div class="filtres">
+                <div class="segments" role="group" aria-label="Filtrer par état">
+                    <button type="button" data-etat="online" aria-pressed="true">En ligne <span class="mono discret" id="seg-online"></span></button>
+                    <button type="button" data-etat="offline" aria-pressed="false">Hors ligne <span class="mono discret" id="seg-offline"></span></button>
+                    <button type="button" data-etat="all" aria-pressed="false">Tous <span class="mono discret" id="seg-all"></span></button>
                 </div>
-                <div class="stat-card">
-                    <span class="stat-value" id="dash-new">-</span>
-                    <span class="stat-label">New this week</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-value" id="dash-unnamed">-</span>
-                    <span class="stat-label">Unnamed devices</span>
-                </div>
-                <div class="stat-card stat-lastscan">
-                    <span class="stat-value" id="dash-lastscan">-</span>
-                    <span class="stat-label" id="dash-lastscan-status">Last scan</span>
-                </div>
-            </section>
-
-            <!-- Widgets grid -->
-            <section class="dash-grid">
-                <div class="dash-widget dash-wide">
-                    <h3 class="widget-title">Devices discovered — last 7 days</h3>
-                    <div class="chart-container"><canvas id="chart-timeline"></canvas></div>
-                </div>
-
-                <div class="dash-widget">
-                    <h3 class="widget-title">Top vendors</h3>
-                    <div class="chart-container"><canvas id="chart-vendors"></canvas></div>
-                </div>
-
-                <div class="dash-widget">
-                    <h3 class="widget-title">OS families</h3>
-                    <div class="chart-container"><canvas id="chart-os"></canvas></div>
-                </div>
-
-                <div class="dash-widget">
-                    <h3 class="widget-title">New devices</h3>
-                    <ul class="widget-list" id="list-new-devices">
-                        <li class="widget-empty">None in the last 7 days</li>
-                    </ul>
-                </div>
-
-                <div class="dash-widget">
-                    <h3 class="widget-title">Ghost devices <span class="widget-hint">offline &gt;7 days</span></h3>
-                    <ul class="widget-list" id="list-ghost-devices">
-                        <li class="widget-empty">None</li>
-                    </ul>
-                </div>
-
-                <div class="dash-widget dash-wide">
-                    <h3 class="widget-title">Recent scan activity</h3>
-                    <ul class="widget-list widget-events" id="list-recent-events">
-                        <li class="widget-empty">No scans yet</li>
-                    </ul>
-                </div>
-            </section>
-        </div>
-
-        <!-- Devices Tab -->
-        <div id="tab-devices" class="tab-content hidden">
-            <section class="filter-bar">
-                <button class="filter-btn active" data-filter="all" onclick="filterDevices('all', this)">All</button>
-                <button class="filter-btn" data-filter="online" onclick="filterDevices('online', this)">Online</button>
-                <button class="filter-btn" data-filter="offline" onclick="filterDevices('offline', this)">Offline</button>
-                <input type="text" id="search-input" placeholder="Search by name, IP, MAC..." oninput="searchDevices(this.value)">
-            </section>
-
-            <section class="devices-section">
-                <table id="devices-table">
-                    <thead>
-                        <tr>
-                            <th>Status</th>
-                            <th>Name</th>
-                            <th>IP Address</th>
-                            <th>MAC Address</th>
-                            <th>Vendor</th>
-                            <th>OS</th>
-                            <th>First Seen</th>
-                            <th>Last Seen</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="devices-body">
-                        <tr><td colspan="9" class="empty-state">Click "Quick Scan" to discover devices on your network</td></tr>
-                    </tbody>
+                <label class="case"><input type="checkbox" id="filtre-a-identifier"> À identifier seulement</label>
+                <label class="recherche recherche-droite">{{ icone('recherche') }}<input type="search" id="recherche-appareils" placeholder="Nom, IP ou MAC" aria-label="Rechercher un appareil"></label>
+            </div>
+            <div class="carte carte-tableau defile">
+                <table class="tableau tableau-appareils">
+                    <thead><tr><th>Appareil</th><th>IP</th><th>MAC</th><th>Fabricant</th><th>Système</th><th>Vu il y a</th><th><span class="sr">Actions</span></th></tr></thead>
+                    <tbody id="corps-appareils"></tbody>
                 </table>
-            </section>
-        </div>
+            </div>
+            <p class="note" id="note-appareils"></p>
+        </section>
 
-        <!-- Logs Tab -->
-        <div id="tab-logs" class="tab-content hidden">
-            <section class="filter-bar">
-                <button class="log-filter-btn active" data-log-filter="all" onclick="filterLogs('all', this)">All</button>
-                <button class="log-filter-btn" data-log-filter="success" onclick="filterLogs('success', this)">Success</button>
-                <button class="log-filter-btn" data-log-filter="partial" onclick="filterLogs('partial', this)">Partial</button>
-                <button class="log-filter-btn" data-log-filter="failed" onclick="filterLogs('failed', this)">Failed</button>
-                <span style="margin-left: 1rem; color: var(--text-muted); font-size: 0.85rem;">Type:</span>
-                <button class="log-type-btn active" data-log-type="all" onclick="filterLogType('all', this)">All</button>
-                <button class="log-type-btn" data-log-type="quick" onclick="filterLogType('quick', this)">Quick</button>
-                <button class="log-type-btn" data-log-type="deep" onclick="filterLogType('deep', this)">Deep</button>
-                <button class="btn btn-small" style="margin-left: auto; background: var(--danger); color: #fff;"
-                        onclick="clearLogs()">Clear All</button>
-            </section>
-
-            <section class="devices-section">
-                <table id="logs-table">
-                    <thead>
-                        <tr>
-                            <th>Status</th>
-                            <th>Type</th>
-                            <th>Target</th>
-                            <th>Hosts</th>
-                            <th>New</th>
-                            <th>Duration</th>
-                            <th>Started</th>
-                            <th>Message</th>
-                        </tr>
-                    </thead>
-                    <tbody id="logs-body">
-                        <tr><td colspan="8" class="empty-state">No scan events yet</td></tr>
-                    </tbody>
+        <!-- Journal -->
+        <section class="vue" id="vue-journal" hidden>
+            <header class="entete">
+                <div class="entete-titre">
+                    <h1>Journal des scans</h1>
+                    <span class="discret">{% if cadence_rapide %}Scan rapide toutes les {{ cadence_rapide }} min{% endif %}{% if cadence_rapide and cadence_approfondi %} · {% endif %}{% if cadence_approfondi %}scan approfondi toutes les {{ cadence_approfondi }} h{% endif %}</span>
+                </div>
+                <div class="segments" role="group" aria-label="Filtrer par type">
+                    <button type="button" data-journal="tous" aria-pressed="true">Tous</button>
+                    <button type="button" data-journal="quick" aria-pressed="false">Rapides</button>
+                    <button type="button" data-journal="deep" aria-pressed="false">Approfondis</button>
+                    <button type="button" data-journal="failed" aria-pressed="false">Échecs</button>
+                </div>
+            </header>
+            <div class="carte carte-tableau defile">
+                <table class="tableau tableau-journal">
+                    <thead><tr><th>Heure</th><th>Type</th><th>Cible</th><th class="nombre">Hôtes</th><th class="nombre">Nouveaux</th><th class="nombre">Durée</th></tr></thead>
+                    <tbody id="corps-journal"></tbody>
                 </table>
-            </section>
-        </div>
-
-        <!-- Scan Status -->
-        <div id="scan-status" class="scan-status hidden">
-            <div class="spinner"></div>
-            <span id="scan-status-text">Scanning...</span>
-        </div>
+            </div>
+        </section>
     </main>
+</div>
 
-    <!-- Device Detail Modal -->
-    <div id="modal-overlay" class="modal-overlay hidden" onclick="closeModal(event)">
-        <div class="modal" onclick="event.stopPropagation()">
-            <div class="modal-header">
-                <h2 id="modal-title">Device Details</h2>
-                <button class="modal-close" onclick="closeModal()">&times;</button>
-            </div>
-            <div class="modal-body" id="modal-body"></div>
+<!-- Fiche d'un appareil : panneau latéral -->
+<div class="voile" id="voile" hidden></div>
+<aside class="fiche" id="fiche" aria-label="Fiche de l'appareil" hidden>
+    <div class="fiche-tete">
+        <div class="fiche-titre">
+            <span class="etat-ligne" id="fiche-etat"></span>
+            <label class="champ">
+                <span class="petit">Nom</span>
+                <input type="text" id="fiche-nom" aria-label="Nom de l'appareil" autocomplete="off">
+            </label>
         </div>
+        <button class="bouton-icone" type="button" id="fiche-fermer" aria-label="Fermer">{{ icone('fermer', 18) }}</button>
     </div>
+    <dl class="fiche-champs" id="fiche-champs"></dl>
+    <section class="fiche-bloc">
+        <h2>Présence, 14 derniers jours</h2>
+        <div class="frise" id="fiche-frise" role="img"></div>
+        <div class="frise-axe mono" id="fiche-frise-axe"></div>
+    </section>
+    <section class="fiche-bloc">
+        <h2>Ports ouverts</h2>
+        <div id="fiche-ports"></div>
+    </section>
+    <label class="fiche-bloc">
+        <span class="fiche-sous-titre">Notes</span>
+        <textarea id="fiche-notes" rows="3" placeholder="Où il se trouve, à qui il appartient"></textarea>
+    </label>
+    <div class="fiche-actions">
+        <button class="btn btn-primaire" type="button" id="fiche-enregistrer">Enregistrer</button>
+        <button class="btn btn-secondaire" type="button" id="fiche-scan">Scan approfondi</button>
+        <button class="btn btn-discret" type="button" id="fiche-archiver">Archiver</button>
+    </div>
+</aside>
 
-    <!-- Event Detail Modal -->
-    <div id="event-modal-overlay" class="modal-overlay hidden" onclick="closeEventModal(event)">
-        <div class="modal" onclick="event.stopPropagation()">
-            <div class="modal-header">
-                <h2 id="event-modal-title">Scan Event</h2>
-                <button class="modal-close" onclick="closeEventModal()">&times;</button>
-            </div>
-            <div class="modal-body" id="event-modal-body"></div>
+<!-- Confirmation : archiver les fantômes -->
+<dialog class="dialogue" id="dialogue-fantomes" aria-labelledby="dialogue-titre">
+    <form method="dialog">
+        <h2 id="dialogue-titre">Archiver les fantômes ?</h2>
+        <p id="dialogue-texte"></p>
+        <div class="dialogue-actions">
+            <button class="btn btn-secondaire" value="non" type="submit">Annuler</button>
+            <button class="btn btn-primaire" value="oui" type="submit">Archiver</button>
         </div>
-    </div>
+    </form>
+</dialog>
 
-    <script src="{{ url_for('static', filename='app.js') }}"></script>
+<div class="annonce" id="annonce" role="status" aria-live="polite" hidden></div>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

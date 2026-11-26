@@ -21,10 +21,28 @@ def create_app():
 
     with app.app_context():
         db.create_all()
+        _migrer()
 
     _start_scheduler(app)
 
     return app
+
+
+def _migrer():
+    """Ajoute les colonnes apparues après la création de la base (create_all ne modifie pas
+    une table existante). Idempotent : ne fait rien si la colonne est déjà là."""
+    from sqlalchemy import inspect, text
+
+    colonnes = {c["name"] for c in inspect(db.engine).get_columns("devices")}
+    ajouts = {
+        "archived": "ALTER TABLE devices ADD COLUMN archived BOOLEAN NOT NULL DEFAULT 0",
+        "archived_at": "ALTER TABLE devices ADD COLUMN archived_at DATETIME",
+    }
+    with db.engine.begin() as con:
+        for nom, sql in ajouts.items():
+            if nom not in colonnes:
+                con.execute(text(sql))
+                logger.info("Migration : colonne devices.%s ajoutée", nom)
 
 
 def _start_scheduler(app):

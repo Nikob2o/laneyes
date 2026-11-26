@@ -1,726 +1,550 @@
-let allDevices = [];
-let currentFilter = "all";
-let currentSearch = "";
-let currentTab = "dashboard";
-let currentLogStatus = "all";
-let currentLogType = "all";
-let charts = {};  // chart instances for cleanup
-const CHART_COLORS = ["#6c5ce7", "#00b894", "#fdcb6e", "#e17055", "#74b9ff", "#a29bfe", "#55efc4", "#ff7675"];
+/* Laneyes — interface (refonte du 26/11/2026).
+   Sans bibliothèque : la courbe est une SVG, les vues se choisissent par l'ancre (#/…). */
+"use strict";
 
-// --- Init ---
-document.addEventListener("DOMContentLoaded", () => {
-    loadDashboard();
-});
+const etat = {
+    vue: "ensemble",
+    filtreEtat: "online",
+    aIdentifier: false,
+    recherche: "",
+    journal: "tous",
+    fiche: null,          // appareil ouvert dans le panneau
+};
 
-// --- Tabs ---
-function switchTab(tab, btn) {
-    currentTab = tab;
-    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
-    if (btn) btn.classList.add("active");
+const $ = (sel, racine = document) => racine.querySelector(sel);
+const $$ = (sel, racine = document) => [...racine.querySelectorAll(sel)];
 
-    document.getElementById("tab-dashboard").classList.toggle("hidden", tab !== "dashboard");
-    document.getElementById("tab-devices").classList.toggle("hidden", tab !== "devices");
-    document.getElementById("tab-logs").classList.toggle("hidden", tab !== "logs");
+// --- Outils ---------------------------------------------------------------
 
-    if (tab === "dashboard") loadDashboard();
-    else if (tab === "devices") { loadStats(); loadDevices(currentFilter); }
-    else if (tab === "logs") loadLogs();
-}
-
-// --- Dashboard ---
-async function loadDashboard() {
-    try {
-        const data = await api("/api/dashboard");
-        renderDashboardStats(data.stats);
-        renderTimelineChart(data.timeline);
-        renderVendorsChart(data.vendors);
-        renderOsChart(data.os_families);
-        renderNewDevices(data.new_devices);
-        renderGhostDevices(data.ghost_devices);
-        renderRecentEvents(data.recent_events);
-    } catch (e) {
-        console.error("Failed to load dashboard:", e);
-    }
-}
-
-function renderDashboardStats(s) {
-    document.getElementById("dash-total").textContent = s.total_devices;
-    document.getElementById("dash-online").textContent = s.online;
-    const pctEl = document.getElementById("dash-online-pct");
-    pctEl.textContent = s.total_devices ? `${s.online_percent}%` : "";
-    pctEl.style.color = s.online_percent >= 80 ? "var(--success)"
-        : s.online_percent >= 50 ? "var(--warning, #fdcb6e)"
-        : "var(--danger)";
-    document.getElementById("dash-new").textContent = s.new_this_week;
-    document.getElementById("dash-unnamed").textContent = s.unnamed;
-
-    const lsEl = document.getElementById("dash-lastscan");
-    const lsStatus = document.getElementById("dash-lastscan-status");
-    if (s.last_scan) {
-        lsEl.textContent = formatAgo(s.last_scan.age_seconds);
-        lsStatus.textContent = `Last ${s.last_scan.scan_type} scan — ${s.last_scan.status}`;
-    } else {
-        lsEl.textContent = "Never";
-        lsStatus.textContent = "Last scan";
-    }
-}
-
-function destroyChart(id) {
-    if (charts[id]) { charts[id].destroy(); delete charts[id]; }
-}
-
-function renderTimelineChart(timeline) {
-    destroyChart("timeline");
-    const ctx = document.getElementById("chart-timeline");
-    if (!ctx) return;
-
-    // Fill gaps: ensure all 7 days have an entry (0 if no scan)
-    const byDate = Object.fromEntries(timeline.map(p => [p.date, p.hosts]));
-    const days = [];
-    for (let i = 6; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        const key = d.toISOString().slice(0, 10);
-        days.push({
-            label: d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }),
-            value: byDate[key] || 0,
-        });
-    }
-
-    charts.timeline = new Chart(ctx, {
-        type: "line",
-        data: {
-            labels: days.map(d => d.label),
-            datasets: [{
-                label: "Hosts found",
-                data: days.map(d => d.value),
-                borderColor: "#6c5ce7",
-                backgroundColor: "rgba(108, 92, 231, 0.15)",
-                fill: true,
-                tension: 0.3,
-                pointBackgroundColor: "#6c5ce7",
-                pointBorderColor: "#fff",
-                pointRadius: 5,
-                pointHoverRadius: 7,
-                spanGaps: true,
-            }],
-        },
-        options: chartBaseOptions({ showY: true }),
-    });
-}
-
-function renderVendorsChart(vendors) {
-    destroyChart("vendors");
-    const ctx = document.getElementById("chart-vendors");
-    if (!ctx) return;
-    if (!vendors.length) {
-        ctx.parentElement.innerHTML = '<p class="widget-empty" style="margin-top:4rem;">No vendor data yet</p>';
-        return;
-    }
-    charts.vendors = new Chart(ctx, {
-        type: "bar",
-        data: {
-            labels: vendors.map(v => v.name.length > 22 ? v.name.slice(0, 22) + "…" : v.name),
-            datasets: [{
-                data: vendors.map(v => v.count),
-                backgroundColor: CHART_COLORS,
-                borderRadius: 4,
-            }],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            indexAxis: "y",
-            plugins: {
-                legend: { display: false },
-                tooltip: { backgroundColor: "#1a1d27", borderColor: "#2a2d3a", borderWidth: 1 },
-            },
-            scales: {
-                x: {
-                    beginAtZero: true,
-                    ticks: { color: "#8b8fa3", font: { size: 11 }, precision: 0, stepSize: 1 },
-                    grid: { color: "rgba(138, 143, 163, 0.08)" },
-                },
-                y: {
-                    ticks: { color: "#cfd3e0", font: { size: 12 }, autoSkip: false },
-                    grid: { display: false },
-                },
-            },
-        },
-    });
-}
-
-function renderOsChart(osFamilies) {
-    destroyChart("os");
-    const ctx = document.getElementById("chart-os");
-    if (!ctx) return;
-    charts.os = new Chart(ctx, {
-        type: "doughnut",
-        data: {
-            labels: osFamilies.map(o => o.name),
-            datasets: [{
-                data: osFamilies.map(o => o.count),
-                backgroundColor: CHART_COLORS,
-                borderColor: "#1a1d27",
-                borderWidth: 2,
-            }],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: "right",
-                    labels: { color: "#8b8fa3", font: { size: 11 }, boxWidth: 12 },
-                },
-            },
-        },
-    });
-}
-
-function chartBaseOptions({ showY = true, noLegend = true } = {}) {
-    return {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: { display: !noLegend, labels: { color: "#8b8fa3" } },
-            tooltip: { backgroundColor: "#1a1d27", borderColor: "#2a2d3a", borderWidth: 1 },
-        },
-        scales: {
-            x: {
-                ticks: { color: "#8b8fa3", font: { size: 11 } },
-                grid: { color: "rgba(138, 143, 163, 0.08)" },
-            },
-            y: {
-                display: showY,
-                beginAtZero: true,
-                ticks: { color: "#8b8fa3", font: { size: 11 }, precision: 0 },
-                grid: { color: "rgba(138, 143, 163, 0.08)" },
-            },
-        },
-    };
-}
-
-function renderNewDevices(devices) {
-    const ul = document.getElementById("list-new-devices");
-    if (devices.length === 0) {
-        ul.innerHTML = '<li class="widget-empty">None in the last 7 days</li>';
-        return;
-    }
-    ul.innerHTML = devices.map(d => `
-        <li class="clickable" onclick="openDeviceModal(${d.id})">
-            <div class="widget-device-main">
-                <div class="widget-device-name" title="${esc(d.display_name)}">${esc(d.display_name)}</div>
-                <div class="widget-device-meta">${esc(d.ip_address || "-")} &middot; ${esc(d.vendor || "unknown")}</div>
-            </div>
-            <span class="widget-time" title="${formatDate(d.first_seen)}">${formatAgoDate(d.first_seen)}</span>
-        </li>
-    `).join("");
-}
-
-function renderGhostDevices(devices) {
-    const ul = document.getElementById("list-ghost-devices");
-    if (devices.length === 0) {
-        ul.innerHTML = '<li class="widget-empty">None</li>';
-        return;
-    }
-    ul.innerHTML = devices.map(d => `
-        <li class="clickable" onclick="openDeviceModal(${d.id})">
-            <div class="widget-device-main">
-                <div class="widget-device-name" title="${esc(d.display_name)}">${esc(d.display_name)}</div>
-                <div class="widget-device-meta">${esc(d.mac_address)}</div>
-            </div>
-            <span class="widget-time" title="${formatDate(d.last_seen)}">${formatAgoDate(d.last_seen)}</span>
-        </li>
-    `).join("");
-}
-
-function renderRecentEvents(events) {
-    const ul = document.getElementById("list-recent-events");
-    if (events.length === 0) {
-        ul.innerHTML = '<li class="widget-empty">No scans yet</li>';
-        return;
-    }
-    ul.innerHTML = events.map(e => `
-        <li class="clickable" onclick="openEventModal(${e.id})">
-            <span class="status-badge ${e.status}">${e.status}</span>
-            <span class="log-type-pill">${e.scan_type}</span>
-            <div class="widget-device-main" style="flex: 1;">
-                <div class="widget-device-meta" title="${esc(e.message || '')}">${esc(truncate(e.message, 60) || "-")}</div>
-            </div>
-            <span class="widget-time">${formatAgoDate(e.started_at)}</span>
-        </li>
-    `).join("");
-}
-
-function formatAgo(seconds) {
-    if (seconds < 60) return `${seconds}s ago`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    return `${Math.floor(seconds / 86400)}d ago`;
-}
-
-function formatAgoDate(isoStr) {
-    if (!isoStr) return "-";
-    const seconds = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
-    return formatAgo(seconds);
-}
-
-// --- API Helpers ---
 async function api(url, options = {}) {
     const resp = await fetch(url, {
         headers: { "Content-Type": "application/json" },
         ...options,
     });
-    if (!resp.ok) throw new Error(`API error: ${resp.status}`);
-    return resp.json();
+    const corps = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+        const err = new Error(corps.error || `HTTP ${resp.status}`);
+        err.corps = corps;
+        throw err;
+    }
+    return corps;
 }
 
-// --- Stats ---
-async function loadStats() {
+function esc(texte) {
+    const d = document.createElement("div");
+    d.textContent = texte == null ? "" : String(texte);
+    return d.innerHTML;
+}
+
+// Les dates de l'API sont en UTC sans fuseau.
+function dateUtc(iso) {
+    if (!iso) return null;
+    return new Date(/[zZ]|[+-]\d\d:\d\d$/.test(iso) ? iso : iso + "Z");
+}
+
+function ilYa(iso) {
+    const d = dateUtc(iso);
+    if (!d) return "—";
+    const s = Math.max(0, (Date.now() - d.getTime()) / 1000);
+    if (s < 60) return "à l'instant";
+    if (s < 3600) return `${Math.round(s / 60)} min`;
+    if (s < 86400) return `${Math.round(s / 3600)} h`;
+    return `${Math.round(s / 86400)} j`;
+}
+
+function ilYaPhrase(iso) {
+    const t = ilYa(iso);
+    return t === "à l'instant" || t === "—" ? t : `il y a ${t}`;
+}
+
+function dateCourte(iso) {
+    const d = dateUtc(iso);
+    if (!d) return "—";
+    return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+}
+
+function dateHeure(iso) {
+    const d = dateUtc(iso);
+    if (!d) return "—";
+    return `${d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" })} ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function duree(ms) {
+    if (ms == null) return "—";
+    if (ms < 60000) return `${(ms / 1000).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} s`;
+    const min = Math.floor(ms / 60000);
+    const s = Math.round((ms % 60000) / 1000);
+    return s ? `${min} min ${s} s` : `${min} min`;
+}
+
+// Bit « administré localement » : les téléphones récents tirent une MAC au hasard.
+function macPrivee(mac) {
+    return !!mac && /^.[26ae]/i.test(mac);
+}
+
+function fabricant(d) {
+    if (d.vendor) return d.vendor;
+    return macPrivee(d.mac_address) ? "MAC privée" : "Inconnu";
+}
+
+function nomAffiche(d) {
+    if (d.custom_name) return d.custom_name;
+    if (d.hostname) return d.hostname;
+    if (d.vendor) return `${d.vendor} · inconnu`;
+    return "Appareil inconnu";
+}
+
+function systeme(os) {
+    if (!os) return "Inconnu";
+    const s = os.toLowerCase();
+    if (/apple|mac os|ios|darwin/.test(s)) return "Apple";
+    if (s.includes("windows")) return "Windows";
+    if (s.includes("android")) return "Android";
+    if (s.includes("qnap")) return "QNAP";
+    if (/linux|ubuntu|debian|raspbian/.test(s)) return "Linux";
+    if (/bsd/.test(s)) return "BSD";
+    return "Autre";
+}
+
+function pastille(enLigne) {
+    return `<span class="point ${enLigne ? "point-enligne" : "point-horsligne"}" aria-hidden="true"></span>`;
+}
+
+let minuteurAnnonce = null;
+function annoncer(texte, erreur = false) {
+    const el = $("#annonce");
+    el.textContent = texte;
+    el.classList.toggle("annonce-erreur", erreur);
+    el.hidden = false;
+    clearTimeout(minuteurAnnonce);
+    minuteurAnnonce = setTimeout(() => { el.hidden = true; }, 5000);
+}
+
+// --- Navigation -----------------------------------------------------------
+
+function lireAncre() {
+    const ancre = location.hash.replace(/^#\/?/, "");
+    if (ancre === "appareils") return { vue: "appareils", aIdentifier: false };
+    if (ancre === "a-identifier") return { vue: "appareils", aIdentifier: true };
+    if (ancre === "journal") return { vue: "journal" };
+    return { vue: "ensemble" };
+}
+
+function afficherVue() {
+    const cible = lireAncre();
+    etat.vue = cible.vue;
+    $$(".vue").forEach((v) => { v.hidden = true; });
+    $$(".nav a").forEach((a) => a.removeAttribute("aria-current"));
+    const nav = location.hash.replace(/^#\/?/, "") || "ensemble";
+    const lien = $(`.nav a[data-vue="${nav === "" ? "ensemble" : nav}"]`) || $('.nav a[data-vue="ensemble"]');
+    lien.setAttribute("aria-current", "page");
+
+    if (cible.vue === "appareils") {
+        etat.aIdentifier = cible.aIdentifier;
+        // « Appareils » s'ouvre sur les appareils en ligne ; « À identifier » et une recherche, sur tous.
+        etat.filtreEtat = cible.aIdentifier || etat.recherche ? "all" : "online";
+        $("#filtre-a-identifier").checked = etat.aIdentifier;
+        $("#titre-appareils").textContent = etat.aIdentifier ? "À identifier" : "Appareils";
+        $("#vue-appareils").hidden = false;
+        majSegments();
+        chargerAppareils();
+    } else if (cible.vue === "journal") {
+        $("#vue-journal").hidden = false;
+        chargerJournal();
+    } else {
+        $("#vue-ensemble").hidden = false;
+        chargerEnsemble();
+    }
+    chargerComptes();
+}
+
+async function chargerComptes() {
     try {
-        const stats = await api("/api/stats");
-        document.getElementById("stat-total").textContent = stats.total_devices;
-        document.getElementById("stat-online").textContent = stats.online;
-        document.getElementById("stat-offline").textContent = stats.offline;
-        document.getElementById("stat-scans").textContent = stats.total_scans;
+        const c = await api("/api/devices/counts");
+        $("#compte-appareils").textContent = c.total;
+        $("#compte-a-identifier").textContent = c.a_identifier;
+        $("#seg-online").textContent = c.online;
+        $("#seg-offline").textContent = c.offline;
+        $("#seg-all").textContent = c.total;
+        return c;
     } catch (e) {
-        console.error("Failed to load stats:", e);
+        return null;
     }
 }
 
-// --- Devices ---
-async function loadDevices(status) {
+// --- Vue d'ensemble -------------------------------------------------------
+
+async function chargerEnsemble() {
+    let data;
     try {
-        const url = status && status !== "all" ? `/api/devices?status=${status}` : "/api/devices";
-        allDevices = await api(url);
-        renderDevices();
+        data = await api("/api/dashboard");
     } catch (e) {
-        console.error("Failed to load devices:", e);
-    }
-}
-
-function renderDevices() {
-    const tbody = document.getElementById("devices-body");
-    let devices = allDevices;
-
-    if (currentSearch) {
-        const q = currentSearch.toLowerCase();
-        devices = devices.filter(d =>
-            (d.display_name || "").toLowerCase().includes(q) ||
-            (d.ip_address || "").toLowerCase().includes(q) ||
-            (d.mac_address || "").toLowerCase().includes(q) ||
-            (d.vendor || "").toLowerCase().includes(q) ||
-            (d.hostname || "").toLowerCase().includes(q)
-        );
-    }
-
-    if (devices.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No devices found</td></tr>';
+        annoncer("Impossible de charger la vue d'ensemble.", true);
         return;
     }
+    const s = data.stats;
+    $("#ch-enligne").textContent = s.online;
+    $("#ch-enligne-pied").textContent = `sur ${s.total_devices} appareil${s.total_devices > 1 ? "s" : ""} connu${s.total_devices > 1 ? "s" : ""}`;
+    $("#ch-nouveaux").textContent = s.new_this_week;
+    const debutSemaine = new Date(Date.now() - 7 * 86400000);
+    $("#ch-nouveaux-pied").textContent = `première apparition depuis le ${debutSemaine.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}`;
+    $("#ch-a-identifier").textContent = s.unnamed;
+    $("#ch-fantomes").textContent = s.ghosts;
+    $("[data-archiver-fantomes]").disabled = s.ghosts === 0;
+    $("#lien-enligne").textContent = `Les ${s.online} appareils en ligne`;
 
-    tbody.innerHTML = devices.map(d => `
-        <tr>
-            <td><span class="status-dot ${d.is_online ? 'online' : 'offline'}"></span></td>
-            <td title="${esc(d.display_name)}${d.hostname && d.custom_name ? ' (' + esc(d.hostname) + ')' : ''}">
-                <div class="device-name">${esc(d.display_name)}</div>
-                ${d.custom_name && d.hostname ? `<div class="device-hostname">${esc(d.hostname)}</div>` : ""}
-            </td>
-            <td title="${esc(d.ip_address || '')}">${esc(d.ip_address || "-")}</td>
-            <td title="${esc(d.mac_address)}">${esc(d.mac_address)}</td>
-            <td title="${esc(d.vendor || '')}">${esc(d.vendor || "-")}</td>
-            <td title="${esc(d.os_info || '')}">${esc(d.os_info || "-")}</td>
-            <td title="${formatDate(d.first_seen)}">${formatDate(d.first_seen)}</td>
-            <td title="${formatDate(d.last_seen)}">${formatDate(d.last_seen)}</td>
-            <td>
-                <div class="action-btns">
-                    <button class="action-btn" onclick="openDeviceModal(${d.id})" title="Details">&#9776;</button>
-                    <button class="action-btn" onclick="deepScanDevice(${d.id}, '${esc(d.ip_address)}')" title="Deep Scan">&#128269;</button>
-                </div>
-            </td>
-        </tr>
-    `).join("");
-}
-
-// --- Filtering & Search ---
-function filterDevices(status, btn) {
-    currentFilter = status;
-    document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
-    if (btn) btn.classList.add("active");
-    loadDevices(status);
-}
-
-function searchDevices(query) {
-    currentSearch = query;
-    renderDevices();
-}
-
-// --- Scanning ---
-async function quickScan() {
-    showScanStatus("Quick scan in progress...");
-    disableScanButtons(true);
-    try {
-        const result = await api("/api/scan/quick", { method: "POST" });
-        showScanStatus(`Found ${result.hosts_found} hosts (${result.new_devices} new)`, 3000);
-        loadDevices(currentFilter);
-        loadStats();
-    } catch (e) {
-        showScanStatus("Scan failed: " + e.message, 5000);
-    } finally {
-        disableScanButtons(false);
+    const scan = s.last_scan;
+    const etatScan = $("#etat-scan");
+    if (scan) {
+        const ok = scan.status !== "failed";
+        const morceaux = [`Dernier scan ${ilYaPhrase(scan.started_at)}`];
+        if (ok) morceaux.push(`${scan.hosts_found} hôte${scan.hosts_found > 1 ? "s" : ""}`);
+        else morceaux.push("échec");
+        if (scan.duration_ms != null) morceaux.push(duree(scan.duration_ms));
+        etatScan.innerHTML = `<span class="point ${ok ? "point-enligne" : "point-echec"}" aria-hidden="true"></span>${esc(morceaux.join(" · "))}`;
+    } else {
+        etatScan.textContent = "Aucun scan pour l'instant";
     }
+
+    dessinerCourbe(data.timeline);
+
+    const nouveaux = $("#liste-nouveaux");
+    nouveaux.innerHTML = data.new_devices.length ? data.new_devices.map((d) => `
+        <li class="ligne-liste">
+            ${pastille(d.is_online)}
+            <button class="ligne-liste-texte" type="button" data-fiche="${d.id}">
+                <span class="${d.custom_name ? "" : "sans-nom"} tronque">${esc(nomAffiche(d))}</span>
+                <span class="mono petit">${esc(d.ip_address || "—")} · ${esc(ilYaPhrase(d.first_seen))}</span>
+            </button>
+            ${d.custom_name ? "" : `<button class="btn btn-petit" type="button" data-nommer="${d.id}">Nommer</button>`}
+        </li>`).join("") : `<li class="vide">Aucun nouvel appareil depuis 7 jours.</li>`;
+
+    $("#corps-enligne").innerHTML = data.online_devices.length ? data.online_devices.map((d) => `
+        <tr class="ligne" data-fiche="${d.id}" tabindex="0">
+            <td><span class="cellule-nom">${pastille(true)}<span class="${d.custom_name ? "" : "sans-nom"} tronque">${esc(nomAffiche(d))}</span></span></td>
+            <td class="mono">${esc(d.ip_address || "—")}</td>
+            <td class="mono discret">${esc(d.mac_address)}</td>
+            <td class="secondaire tronque">${esc(fabricant(d))}</td>
+            <td class="mono discret">${esc(ilYa(d.first_seen))}</td>
+        </tr>`).join("") : `<tr><td colspan="5" class="vide">Aucun appareil en ligne. Lancez un scan rapide.</td></tr>`;
 }
 
-async function deepScanAll() {
-    showScanStatus("Deep scan in progress (this may take a while)...");
-    disableScanButtons(true);
-    try {
-        const result = await api("/api/scan/deep", { method: "POST" });
-        showScanStatus(`Deep scan complete: ${result.devices_scanned} devices analyzed`, 3000);
-        loadDevices(currentFilter);
-        loadStats();
-    } catch (e) {
-        showScanStatus("Deep scan failed: " + e.message, 5000);
-    } finally {
-        disableScanButtons(false);
+function dessinerCourbe(points) {
+    const conteneur = $("#courbe");
+    const valeurs = points.map((p) => p.hosts);
+    const connues = valeurs.filter((v) => v != null);
+    if (!connues.length) {
+        conteneur.innerHTML = `<p class="vide">Pas encore de scan rapide sur les 7 derniers jours.</p>`;
+        $("#courbe-ecart").textContent = "";
+        return;
     }
-}
+    // Largeur réelle du conteneur : les graduations gardent 11 px, même sur téléphone.
+    const L = Math.max(300, Math.round(conteneur.clientWidth || 760)), H = L < 500 ? 200 : 250;
+    const g = 40, d = 12, h = 16, b = 30;
+    let min = Math.min(...connues), max = Math.max(...connues);
+    const pas = Math.max(1, Math.ceil((max - min + 2) / 4 / 5) * 5);
+    min = Math.max(0, Math.floor((min - 1) / pas) * pas);
+    max = min + pas * 4;
+    const x = (i) => g + (i * (L - g - d)) / (points.length - 1);
+    const y = (v) => h + ((max - v) * (H - h - b)) / (max - min);
 
-async function deepScanDevice(deviceId, ip) {
-    showScanStatus(`Deep scanning ${ip}...`);
-    try {
-        const result = await api("/api/scan/deep", {
-            method: "POST",
-            body: JSON.stringify({ target_ip: ip }),
-        });
-        showScanStatus("Deep scan complete", 3000);
-        loadDevices(currentFilter);
-        loadStats();
-        // Refresh modal if open
-        if (!document.getElementById("modal-overlay").classList.contains("hidden")) {
-            openDeviceModal(deviceId);
-        }
-    } catch (e) {
-        showScanStatus("Deep scan failed: " + e.message, 5000);
-    }
-}
-
-function showScanStatus(text, autoHideMs) {
-    const el = document.getElementById("scan-status");
-    const textEl = document.getElementById("scan-status-text");
-    textEl.textContent = text;
-    el.classList.remove("hidden");
-    if (autoHideMs) {
-        setTimeout(() => el.classList.add("hidden"), autoHideMs);
-    }
-}
-
-function disableScanButtons(disabled) {
-    document.getElementById("btn-quick-scan").disabled = disabled;
-    document.getElementById("btn-deep-scan").disabled = disabled;
-}
-
-// --- Device Modal ---
-async function openDeviceModal(deviceId) {
-    const overlay = document.getElementById("modal-overlay");
-    const title = document.getElementById("modal-title");
-    const body = document.getElementById("modal-body");
-
-    try {
-        const [device, history] = await Promise.all([
-            api(`/api/devices/${deviceId}`),
-            api(`/api/devices/${deviceId}/history`),
-        ]);
-
-        title.textContent = device.display_name;
-
-        let portsHtml = "";
-        if (device.open_ports) {
-            try {
-                const ports = JSON.parse(device.open_ports);
-                if (ports.length > 0) {
-                    portsHtml = `
-                        <div class="section-title">Open Ports</div>
-                        <table class="ports-table">
-                            <thead><tr><th>Port</th><th>Protocol</th><th>State</th><th>Service</th><th>Version</th></tr></thead>
-                            <tbody>
-                                ${ports.map(p => `<tr>
-                                    <td>${p.port}</td><td>${p.protocol}</td>
-                                    <td>${p.state}</td><td>${p.service}</td><td>${p.version || "-"}</td>
-                                </tr>`).join("")}
-                            </tbody>
-                        </table>
-                    `;
-                }
-            } catch (_) {}
-        }
-
-        let historyHtml = "";
-        if (history.length > 0) {
-            historyHtml = `
-                <div class="section-title">Scan History (last ${history.length})</div>
-                <div class="history-list">
-                    ${history.map(h => `
-                        <div class="history-item">
-                            <span>${esc(h.ip_address)}</span>
-                            <span class="badge">${h.scan_type}</span>
-                            <span class="time">${formatDate(h.scan_time)}</span>
-                        </div>
-                    `).join("")}
-                </div>
-            `;
-        }
-
-        body.innerHTML = `
-            <div class="detail-grid">
-                <div class="detail-item">
-                    <label>Custom Name</label>
-                    <input type="text" id="edit-custom-name" value="${esc(device.custom_name || "")}"
-                           placeholder="Give this device a name...">
-                </div>
-                <div class="detail-item">
-                    <label>Status</label>
-                    <span>${device.is_online ? '<span class="status-dot online"></span> Online' : '<span class="status-dot offline"></span> Offline'}</span>
-                </div>
-                <div class="detail-item">
-                    <label>IP Address</label>
-                    <span>${esc(device.ip_address || "-")}</span>
-                </div>
-                <div class="detail-item">
-                    <label>MAC Address</label>
-                    <span>${esc(device.mac_address)}</span>
-                </div>
-                <div class="detail-item">
-                    <label>Hostname</label>
-                    <span>${esc(device.hostname || "-")}</span>
-                </div>
-                <div class="detail-item">
-                    <label>Vendor</label>
-                    <span>${esc(device.vendor || "-")}</span>
-                </div>
-                <div class="detail-item">
-                    <label>OS Info</label>
-                    <span>${esc(device.os_info || "Run deep scan to detect")}</span>
-                </div>
-                <div class="detail-item">
-                    <label>First Seen</label>
-                    <span>${formatDate(device.first_seen)}</span>
-                </div>
-                <div class="detail-item detail-full">
-                    <label>Notes</label>
-                    <textarea id="edit-notes" placeholder="Add notes about this device...">${esc(device.notes || "")}</textarea>
-                </div>
-            </div>
-            ${portsHtml}
-            ${historyHtml}
-            <div class="modal-actions">
-                <button class="btn btn-primary" onclick="saveDevice(${device.id})">Save Changes</button>
-                <button class="btn btn-secondary" onclick="deepScanDevice(${device.id}, '${esc(device.ip_address)}')">Deep Scan</button>
-                <button class="btn btn-small" style="background:var(--danger);color:#fff;margin-left:auto" onclick="deleteDevice(${device.id})">Delete</button>
-            </div>
-        `;
-
-        overlay.classList.remove("hidden");
-    } catch (e) {
-        console.error("Failed to load device:", e);
-    }
-}
-
-function closeModal(event) {
-    if (event && event.target !== event.currentTarget) return;
-    document.getElementById("modal-overlay").classList.add("hidden");
-}
-
-async function saveDevice(deviceId) {
-    const customName = document.getElementById("edit-custom-name").value.trim();
-    const notes = document.getElementById("edit-notes").value.trim();
-    try {
-        await api(`/api/devices/${deviceId}`, {
-            method: "PUT",
-            body: JSON.stringify({ custom_name: customName, notes: notes }),
-        });
-        loadDevices(currentFilter);
-        showScanStatus("Device updated", 2000);
-    } catch (e) {
-        showScanStatus("Failed to save: " + e.message, 3000);
-    }
-}
-
-async function deleteDevice(deviceId) {
-    if (!confirm("Delete this device and its history?")) return;
-    try {
-        await api(`/api/devices/${deviceId}`, { method: "DELETE" });
-        closeModal();
-        loadDevices(currentFilter);
-        loadStats();
-        showScanStatus("Device deleted", 2000);
-    } catch (e) {
-        showScanStatus("Failed to delete: " + e.message, 3000);
-    }
-}
-
-// --- Helpers ---
-function esc(str) {
-    if (!str) return "";
-    const div = document.createElement("div");
-    div.textContent = str;
-    return div.innerHTML;
-}
-
-function formatDate(isoStr) {
-    if (!isoStr) return "-";
-    const d = new Date(isoStr);
-    return d.toLocaleDateString("fr-FR", {
-        day: "2-digit", month: "2-digit", year: "numeric",
-        hour: "2-digit", minute: "2-digit",
+    const grille = [0, 1, 2, 3, 4].map((k) => {
+        const v = min + k * pas;
+        return `<line x1="${g}" y1="${y(v)}" x2="${L - d}" y2="${y(v)}"/><text x="${g - 10}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
+    }).join("");
+    // Une journée sans scan coupe la courbe plutôt que d'inventer une valeur.
+    const segments = [];
+    let courant = [];
+    points.forEach((p, i) => {
+        if (p.hosts == null) { if (courant.length) segments.push(courant); courant = []; }
+        else courant.push([x(i), y(p.hosts)]);
     });
+    if (courant.length) segments.push(courant);
+    const traces = segments.map((seg) => {
+        const pts = seg.map(([a, c]) => `${a},${c}`).join(" ");
+        const aire = seg.length > 1 ? `<polygon class="courbe-aire" points="${pts} ${seg[seg.length - 1][0]},${H - b} ${seg[0][0]},${H - b}"/>` : "";
+        return `${aire}<polyline class="courbe-ligne" points="${pts}"/>`;
+    }).join("");
+    const dernierIndex = valeurs.map((v, i) => (v != null ? i : -1)).filter((i) => i >= 0).pop();
+    const etiquettes = points.map((p, i) => {
+        const [, mois, jour] = p.date.split("-");
+        const texte = i === 0 ? `${jour}/${mois}` : jour;
+        if (L < 500 && i % 2 && i !== points.length - 1) return "";
+        return `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${texte}</text>`;
+    }).join("");
+    const premier = points.find((p) => p.hosts != null);
+    const dernier = points[dernierIndex];
+    const resume = `Maximum d'appareils en ligne par jour : ${premier.hosts} le ${premier.date.slice(8)}/${premier.date.slice(5, 7)}, ${dernier.hosts} le ${dernier.date.slice(8)}/${dernier.date.slice(5, 7)}`;
+    conteneur.innerHTML = `<svg class="courbe" viewBox="0 0 ${L} ${H}" role="img" aria-label="${esc(resume)}">
+        <g class="courbe-grille">${grille}</g>${traces}
+        <circle class="courbe-point" cx="${x(dernierIndex)}" cy="${y(dernier.hosts)}" r="4"/>
+        <g class="courbe-axe">${etiquettes}</g></svg>`;
+    const ecart = dernier.hosts - premier.hosts;
+    $("#courbe-ecart").textContent = premier === dernier ? "" :
+        `${ecart > 0 ? "+" : ecart < 0 ? "−" : "±"}${Math.abs(ecart)} depuis le ${premier.date.slice(8)}/${premier.date.slice(5, 7)}`;
 }
 
-// Keyboard: close modals on Escape
-document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-        closeModal();
-        closeEventModal();
+// --- Appareils ------------------------------------------------------------
+
+function majSegments() {
+    $$("[data-etat]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.etat === etat.filtreEtat)));
+}
+
+let jetonAppareils = 0;
+async function chargerAppareils() {
+    const params = new URLSearchParams();
+    if (etat.filtreEtat !== "all") params.set("status", etat.filtreEtat);
+    if (etat.aIdentifier) params.set("a_identifier", "1");
+    if (etat.recherche) params.set("q", etat.recherche);
+    const jeton = ++jetonAppareils;
+    let liste;
+    try {
+        liste = await api(`/api/devices?${params}`);
+    } catch (e) {
+        annoncer("Impossible de charger les appareils.", true);
+        return;
     }
+    if (jeton !== jetonAppareils) return;  // une frappe plus récente a déjà relancé la requête
+    const corps = $("#corps-appareils");
+    corps.innerHTML = liste.length ? liste.map((d) => `
+        <tr class="ligne" data-fiche="${d.id}" tabindex="0">
+            <td><span class="cellule-nom">${pastille(d.is_online)}<span class="nom-pile">
+                <span class="${d.custom_name ? "" : "sans-nom"} tronque">${esc(nomAffiche(d))}</span>
+                <span class="petit tronque">${esc(d.custom_name && d.hostname ? d.hostname : "—")}</span></span></span></td>
+            <td class="mono">${esc(d.ip_address || "—")}</td>
+            <td class="mono discret">${esc(d.mac_address)}</td>
+            <td class="secondaire tronque">${esc(fabricant(d))}</td>
+            <td class="secondaire">${esc(systeme(d.os_info))}</td>
+            <td class="mono discret">${esc(ilYa(d.last_seen))}</td>
+            <td class="cellule-action">${d.custom_name ? "" : `<button class="btn btn-petit" type="button" data-nommer="${d.id}">Nommer</button>`}</td>
+        </tr>`).join("") : `<tr><td colspan="7" class="vide">${etat.recherche ? "Aucun appareil ne correspond à cette recherche." : "Aucun appareil dans ce filtre."}</td></tr>`;
+
+    const c = await chargerComptes();
+    if (c) {
+        const morceaux = [`${liste.length} appareil${liste.length > 1 ? "s" : ""} affiché${liste.length > 1 ? "s" : ""}`];
+        if (c.fantomes) morceaux.push(`${c.fantomes} hors ligne depuis plus de 7 jours, archivables en une fois`);
+        $("#note-appareils").innerHTML = esc(morceaux.join(" · ")) +
+            (c.fantomes ? ` · <button class="lien" type="button" data-archiver-fantomes>Archiver les fantômes</button>` : "");
+    }
+}
+
+// --- Fiche ----------------------------------------------------------------
+
+async function ouvrirFiche(id, { nommer = false } = {}) {
+    let d, presence;
+    try {
+        [d, presence] = await Promise.all([api(`/api/devices/${id}`), api(`/api/devices/${id}/presence?days=14`)]);
+    } catch (e) {
+        annoncer("Impossible d'ouvrir la fiche.", true);
+        return;
+    }
+    etat.fiche = d;
+    $("#fiche-etat").innerHTML = `${pastille(d.is_online)}${esc(d.is_online ? `En ligne, vu ${ilYaPhrase(d.last_seen)}` : `Hors ligne, vu ${ilYaPhrase(d.last_seen)}`)}`;
+    const nom = $("#fiche-nom");
+    nom.value = d.custom_name || "";
+    nom.placeholder = "Donner un nom à cet appareil";
+    $("#fiche-notes").value = d.notes || "";
+
+    const champs = [
+        ["Adresse IP", d.ip_address || "—", true],
+        ["MAC", d.mac_address, true],
+        ["Nom d'hôte", d.hostname || "—", false],
+        ["Fabricant", fabricant(d), false],
+        ["Système", d.os_info || "Inconnu · lancer un scan approfondi", false],
+        ["Vu la 1re fois", dateHeure(d.first_seen), true],
+        ["Vu la dernière", ilYaPhrase(d.last_seen), true],
+    ];
+    $("#fiche-champs").innerHTML = champs.map(([k, v, mono]) =>
+        `<dt>${esc(k)}</dt><dd class="${mono ? "mono" : ""}">${esc(v)}</dd>`).join("");
+
+    const jours = presence.filter((j) => j.present).length;
+    const frise = $("#fiche-frise");
+    frise.setAttribute("aria-label", `Vu ${jours} jour${jours > 1 ? "s" : ""} sur les 14 derniers`);
+    frise.innerHTML = presence.map((j) =>
+        `<span class="frise-jour${j.present ? " present" : ""}" title="${esc(dateCourte(j.date))}${j.present ? " : vu" : " : absent"}"></span>`).join("");
+    $("#fiche-frise-axe").innerHTML = `<span>${esc(dateCourte(presence[0].date))}</span><span>${esc(dateCourte(presence[presence.length - 1].date))}</span>`;
+
+    let ports = [];
+    try { ports = d.open_ports ? JSON.parse(d.open_ports) : []; } catch (e) { ports = []; }
+    $("#fiche-ports").innerHTML = ports.length
+        ? `<ul class="ports">${ports.map((p) => `<li><span class="mono">${esc(p.port)}/${esc(p.protocol || "tcp")}</span><span class="secondaire">${esc([p.service, p.product, p.version].filter(Boolean).join(" ") || "—")}</span></li>`).join("")}</ul>`
+        : `<p class="vide-court">Pas encore de scan approfondi pour cet appareil.</p>`;
+    $("#fiche-archiver").textContent = d.archived ? "Désarchiver" : "Archiver";
+
+    $("#voile").hidden = false;
+    $("#fiche").hidden = false;
+    document.body.classList.add("fiche-ouverte");
+    if (nommer) { nom.focus(); nom.select(); } else { $("#fiche-fermer").focus(); }
+}
+
+function fermerFiche() {
+    $("#voile").hidden = true;
+    $("#fiche").hidden = true;
+    document.body.classList.remove("fiche-ouverte");
+    etat.fiche = null;
+}
+
+async function enregistrerFiche() {
+    const d = etat.fiche;
+    if (!d) return;
+    try {
+        await api(`/api/devices/${d.id}`, {
+            method: "PUT",
+            body: JSON.stringify({ custom_name: $("#fiche-nom").value, notes: $("#fiche-notes").value }),
+        });
+    } catch (e) {
+        annoncer("Enregistrement impossible.", true);
+        return;
+    }
+    annoncer("Fiche enregistrée.");
+    fermerFiche();
+    rafraichir();
+}
+
+async function archiverFiche() {
+    const d = etat.fiche;
+    if (!d) return;
+    try {
+        await api(`/api/devices/${d.id}/${d.archived ? "unarchive" : "archive"}`, { method: "POST" });
+    } catch (e) {
+        annoncer("Archivage impossible.", true);
+        return;
+    }
+    annoncer(d.archived ? "Appareil désarchivé." : `« ${nomAffiche(d)} » archivé : il ne s'affiche plus dans les listes.`);
+    fermerFiche();
+    rafraichir();
+}
+
+// --- Fantômes -------------------------------------------------------------
+
+async function archiverFantomes() {
+    let n;
+    try {
+        n = (await api("/api/devices/counts")).fantomes;
+    } catch (e) { return; }
+    if (!n) { annoncer("Aucun fantôme à archiver."); return; }
+    const dialogue = $("#dialogue-fantomes");
+    $("#dialogue-texte").textContent = `${n} appareil${n > 1 ? "s" : ""} hors ligne depuis plus de 7 jours ${n > 1 ? "seront masqués" : "sera masqué"} des listes. Rien n'est supprimé, et un appareil qui revient sur le réseau réapparaît de lui-même.`;
+    dialogue.returnValue = "";
+    dialogue.showModal();
+    dialogue.addEventListener("close", async () => {
+        if (dialogue.returnValue !== "oui") return;
+        try {
+            const r = await api("/api/devices/archive-ghosts", { method: "POST", body: JSON.stringify({ confirm: true }) });
+            annoncer(`${r.archived} appareil${r.archived > 1 ? "s" : ""} archivé${r.archived > 1 ? "s" : ""}.`);
+        } catch (e) {
+            annoncer("Archivage impossible.", true);
+        }
+        rafraichir();
+    }, { once: true });
+}
+
+// --- Scans ----------------------------------------------------------------
+
+async function lancerScan(type, cible = null) {
+    const boutons = $$("[data-scan], #fiche-scan");
+    boutons.forEach((b) => { b.disabled = true; });
+    annoncer(type === "quick" ? "Scan rapide en cours…" : "Scan approfondi en cours, cela peut prendre quelques minutes…");
+    try {
+        const r = await api(`/api/scan/${type}`, { method: "POST", body: JSON.stringify(cible ? { target_ip: cible } : {}) });
+        if (type === "quick") {
+            annoncer(`Scan terminé : ${r.hosts_found} hôte${r.hosts_found > 1 ? "s" : ""}, ${r.new_devices} nouveau${r.new_devices > 1 ? "x" : ""}.`);
+        } else {
+            annoncer(`Scan approfondi terminé : ${r.devices_scanned} appareil${r.devices_scanned > 1 ? "s" : ""} analysé${r.devices_scanned > 1 ? "s" : ""}.`);
+        }
+    } catch (e) {
+        annoncer("Le scan a échoué ; le détail est dans le journal.", true);
+    } finally {
+        boutons.forEach((b) => { b.disabled = false; });
+    }
+    if (cible && etat.fiche) ouvrirFiche(etat.fiche.id);
+    rafraichir();
+}
+
+// --- Journal --------------------------------------------------------------
+
+const TYPES = { quick: "Rapide", deep: "Approfondi" };
+
+async function chargerJournal() {
+    const params = new URLSearchParams({ limit: "200" });
+    if (etat.journal === "quick" || etat.journal === "deep") params.set("type", etat.journal);
+    if (etat.journal === "failed") params.set("status", "failed");
+    let evenements;
+    try {
+        evenements = await api(`/api/events?${params}`);
+    } catch (e) {
+        annoncer("Impossible de charger le journal.", true);
+        return;
+    }
+    $$("[data-journal]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.journal === etat.journal)));
+    $("#corps-journal").innerHTML = evenements.length ? evenements.map((e) => {
+        const echec = e.status === "failed";
+        const d = dateUtc(e.started_at);
+        const heure = d ? `${d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })} ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "—";
+        return `<tr class="ligne-journal"${echec && e.message ? ` title="${esc(e.message.split("\n")[0])}"` : ""}>
+            <td><span class="cellule-nom"><span class="point ${echec ? "point-echec" : "point-enligne"}" aria-hidden="true"></span><span class="mono">${esc(heure)}</span>${echec ? `<span class="sr">échec</span>` : ""}</span></td>
+            <td class="secondaire">${esc(TYPES[e.scan_type] || e.scan_type)}</td>
+            <td class="mono discret">${esc(e.target || "—")}</td>
+            <td class="nombre mono">${echec ? "—" : esc(e.hosts_found)}</td>
+            <td class="nombre mono ${e.new_devices ? "" : "discret"}">${echec ? "—" : esc(e.new_devices)}</td>
+            <td class="nombre mono secondaire">${esc(duree(e.duration_ms))}</td>
+        </tr>`;
+    }).join("") : `<tr><td colspan="6" class="vide">Aucun scan dans ce filtre.</td></tr>`;
+}
+
+// --- Câblage --------------------------------------------------------------
+
+function rafraichir() {
+    if (etat.vue === "appareils") chargerAppareils();
+    else if (etat.vue === "journal") chargerJournal();
+    else chargerEnsemble();
+    chargerComptes();
+}
+
+document.addEventListener("click", (ev) => {
+    const nommer = ev.target.closest("[data-nommer]");
+    if (nommer) { ouvrirFiche(nommer.dataset.nommer, { nommer: true }); return; }
+    const fiche = ev.target.closest("[data-fiche]");
+    if (fiche) { ouvrirFiche(fiche.dataset.fiche); return; }
+    const scan = ev.target.closest("[data-scan]");
+    if (scan) { lancerScan(scan.dataset.scan); return; }
+    if (ev.target.closest("[data-archiver-fantomes]")) { archiverFantomes(); return; }
+    const seg = ev.target.closest("[data-etat]");
+    if (seg) { etat.filtreEtat = seg.dataset.etat; majSegments(); chargerAppareils(); return; }
+    const j = ev.target.closest("[data-journal]");
+    if (j) { etat.journal = j.dataset.journal; chargerJournal(); }
 });
 
-// --- Logs ---
-async function loadLogs() {
-    const params = new URLSearchParams();
-    if (currentLogType !== "all") params.set("type", currentLogType);
-    if (currentLogStatus !== "all") params.set("status", currentLogStatus);
+document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && etat.fiche) { fermerFiche(); return; }
+    if (ev.key === "Enter" && ev.target.matches("tr[data-fiche]")) ouvrirFiche(ev.target.dataset.fiche);
+});
 
-    try {
-        const events = await api("/api/events?" + params.toString());
-        renderLogs(events);
-    } catch (e) {
-        console.error("Failed to load logs:", e);
-    }
-}
+let minuteurRecherche = null;
+$("#recherche-appareils").addEventListener("input", (ev) => {
+    etat.recherche = ev.target.value.trim();
+    clearTimeout(minuteurRecherche);
+    minuteurRecherche = setTimeout(chargerAppareils, 200);
+});
+$("#filtre-a-identifier").addEventListener("change", (ev) => {
+    etat.aIdentifier = ev.target.checked;
+    $("#titre-appareils").textContent = etat.aIdentifier ? "À identifier" : "Appareils";
+    chargerAppareils();
+});
+// La recherche de la vue d'ensemble ouvre la liste complète, filtrée.
+$("[data-recherche-globale]").addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    etat.recherche = ev.target.value.trim();
+    etat.filtreEtat = "all";
+    $("#recherche-appareils").value = etat.recherche;
+    location.hash = "#/appareils";
+});
+$("#fiche-fermer").addEventListener("click", fermerFiche);
+$("#voile").addEventListener("click", fermerFiche);
+$("#fiche-enregistrer").addEventListener("click", enregistrerFiche);
+$("#fiche-nom").addEventListener("keydown", (ev) => { if (ev.key === "Enter") enregistrerFiche(); });
+$("#fiche-archiver").addEventListener("click", archiverFiche);
+$("#fiche-scan").addEventListener("click", () => { if (etat.fiche) lancerScan("deep", etat.fiche.ip_address); });
 
-function renderLogs(events) {
-    const tbody = document.getElementById("logs-body");
-    if (events.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No scan events match these filters</td></tr>';
-        return;
-    }
-
-    tbody.innerHTML = events.map(e => `
-        <tr class="log-row" onclick="openEventModal(${e.id})">
-            <td><span class="status-badge ${e.status}">${e.status}</span></td>
-            <td><span class="log-type-pill">${e.scan_type}</span></td>
-            <td title="${esc(e.target || '')}">${esc(e.target || "-")}</td>
-            <td>${e.hosts_found ?? 0}</td>
-            <td>${e.new_devices ?? 0}</td>
-            <td>${formatDuration(e.duration_ms)}</td>
-            <td title="${formatDate(e.started_at)}">${formatDate(e.started_at)}</td>
-            <td title="${esc(e.message || '')}">${esc(e.message || "-")}</td>
-        </tr>
-    `).join("");
-}
-
-function filterLogs(status, btn) {
-    currentLogStatus = status;
-    document.querySelectorAll(".log-filter-btn").forEach(b => b.classList.remove("active"));
-    if (btn) btn.classList.add("active");
-    loadLogs();
-}
-
-function filterLogType(type, btn) {
-    currentLogType = type;
-    document.querySelectorAll(".log-type-btn").forEach(b => b.classList.remove("active"));
-    if (btn) btn.classList.add("active");
-    loadLogs();
-}
-
-async function clearLogs() {
-    if (!confirm("Delete all scan event logs?")) return;
-    try {
-        await api("/api/events", { method: "DELETE" });
-        loadLogs();
-        showScanStatus("Logs cleared", 2000);
-    } catch (e) {
-        showScanStatus("Failed to clear: " + e.message, 3000);
-    }
-}
-
-async function openEventModal(eventId) {
-    try {
-        const e = await api(`/api/events/${eventId}`);
-        const body = document.getElementById("event-modal-body");
-        const title = document.getElementById("event-modal-title");
-
-        title.textContent = `${e.scan_type.toUpperCase()} scan — ${e.status}`;
-
-        const isError = e.status === "failed";
-        const messageHtml = isError
-            ? `<pre class="traceback">${esc(e.message || "")}</pre>`
-            : `<div style="color: var(--text); font-size: 0.9rem;">${esc(e.message || "-")}</div>`;
-
-        body.innerHTML = `
-            <div class="detail-grid">
-                <div class="detail-item">
-                    <label>Status</label>
-                    <span><span class="status-badge ${e.status}">${e.status}</span></span>
-                </div>
-                <div class="detail-item">
-                    <label>Type</label>
-                    <span>${e.scan_type}</span>
-                </div>
-                <div class="detail-item">
-                    <label>Target</label>
-                    <span>${esc(e.target || "-")}</span>
-                </div>
-                <div class="detail-item">
-                    <label>Duration</label>
-                    <span>${formatDuration(e.duration_ms)}</span>
-                </div>
-                <div class="detail-item">
-                    <label>Hosts Found</label>
-                    <span>${e.hosts_found ?? 0}</span>
-                </div>
-                <div class="detail-item">
-                    <label>New Devices</label>
-                    <span>${e.new_devices ?? 0}</span>
-                </div>
-                <div class="detail-item">
-                    <label>Started</label>
-                    <span>${formatDate(e.started_at)}</span>
-                </div>
-                <div class="detail-item">
-                    <label>Finished</label>
-                    <span>${formatDate(e.finished_at)}</span>
-                </div>
-                <div class="detail-item detail-full">
-                    <label>${isError ? "Error / Traceback" : "Message"}</label>
-                    ${messageHtml}
-                </div>
-            </div>
-        `;
-
-        document.getElementById("event-modal-overlay").classList.remove("hidden");
-    } catch (err) {
-        console.error("Failed to load event:", err);
-    }
-}
-
-function closeEventModal(event) {
-    if (event && event.target !== event.currentTarget) return;
-    document.getElementById("event-modal-overlay").classList.add("hidden");
-}
-
-function truncate(str, n) {
-    if (!str) return "";
-    return str.length > n ? str.slice(0, n) + "…" : str;
-}
-
-function formatDuration(ms) {
-    if (ms == null) return "-";
-    if (ms < 1000) return `${ms} ms`;
-    const s = (ms / 1000).toFixed(1);
-    if (ms < 60000) return `${s} s`;
-    const m = Math.floor(ms / 60000);
-    const rem = ((ms % 60000) / 1000).toFixed(0);
-    return `${m}m ${rem}s`;
-}
+window.addEventListener("hashchange", afficherVue);
+afficherVue();

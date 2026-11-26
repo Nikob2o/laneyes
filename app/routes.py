@@ -1,43 +1,52 @@
-from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, render_template, request
-from sqlalchemy import func
+from sqlalchemy import and_, or_
 
 from app import db
 from app.models import Device, ScanRecord, ScanEvent
 from app.scanner import quick_scan, deep_scan
 from config import Config
 
-
-def _os_family(os_info: str | None) -> str:
-    """Extract a simple OS family label from the nmap os_info string."""
-    if not os_info:
-        return "Unknown"
-    s = os_info.lower()
-    if "apple" in s or "mac" in s or "ios" in s or "darwin" in s:
-        return "Apple"
-    if "windows" in s:
-        return "Windows"
-    if "android" in s:
-        return "Android"
-    if "qnap" in s:
-        return "QNAP"
-    if "linux" in s or "ubuntu" in s or "debian" in s or "raspbian" in s:
-        return "Linux"
-    if "freebsd" in s or "openbsd" in s or "netbsd" in s:
-        return "BSD"
-    return "Other"
-
 main = Blueprint("main", __name__)
+
+# Un appareil hors ligne depuis plus longtemps que ça est un « fantôme ».
+JOURS_FANTOME = 7
+
+
+def _maintenant() -> datetime:
+    """UTC sans fuseau : c'est ainsi que SQLite rend les dates stockées par le scanner."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _visible():
+    """Les appareils affichés : non archivés, ou archivés puis revus sur le réseau."""
+    return or_(
+        Device.archived.is_(False),
+        and_(Device.archived_at.isnot(None), Device.last_seen > Device.archived_at),
+    )
+
+
+def _sans_nom():
+    return or_(Device.custom_name.is_(None), Device.custom_name == "")
+
+
+def _fantomes(maintenant: datetime):
+    limite = maintenant - timedelta(days=JOURS_FANTOME)
+    return Device.query.filter(_visible(), Device.is_online.is_(False), Device.last_seen < limite)
 
 
 @main.route("/")
 def index():
-    return render_template("index.html")
+    return render_template(
+        "index.html",
+        reseau=Config.NETWORK_CIDR,
+        cadence_rapide=Config.AUTO_SCAN_MINUTES,
+        cadence_approfondi=Config.DEEP_SCAN_HOURS,
+    )
 
 
-# --- API: Scanning ---
+# --- API : scans ---
 
 
 @main.route("/api/scan/quick", methods=["POST"])
@@ -57,19 +66,51 @@ def api_deep_scan():
     return jsonify(result)
 
 
-# --- API: Devices ---
+# --- API : appareils ---
 
 
 @main.route("/api/devices")
 def api_devices():
-    status = request.args.get("status")  # "online", "offline", or None for all
+    """Liste des appareils visibles.
+
+    status : online | offline | (rien = tous) ; a_identifier=1 : sans nom donné ;
+    q : nom, nom d'hôte, IP ou MAC ; archives=1 : les archivés seulement.
+    """
+    status = request.args.get("status")
     query = Device.query
+    if request.args.get("archives") == "1":
+        query = query.filter(~_visible())
+    else:
+        query = query.filter(_visible())
     if status == "online":
-        query = query.filter_by(is_online=True)
+        query = query.filter(Device.is_online.is_(True))
     elif status == "offline":
-        query = query.filter_by(is_online=False)
-    devices = query.order_by(Device.last_seen.desc()).all()
+        query = query.filter(Device.is_online.is_(False))
+    if request.args.get("a_identifier") == "1":
+        query = query.filter(_sans_nom())
+    q = (request.args.get("q") or "").strip()
+    if q:
+        motif = f"%{q}%"
+        query = query.filter(or_(
+            Device.custom_name.ilike(motif), Device.hostname.ilike(motif),
+            Device.ip_address.ilike(motif), Device.mac_address.ilike(motif),
+            Device.vendor.ilike(motif),
+        ))
+    devices = query.order_by(Device.is_online.desc(), Device.last_seen.desc()).all()
     return jsonify([d.to_dict() for d in devices])
+
+
+@main.route("/api/devices/counts")
+def api_device_counts():
+    """Compteurs de la barre latérale et des filtres."""
+    visibles = Device.query.filter(_visible())
+    return jsonify({
+        "total": visibles.count(),
+        "online": visibles.filter(Device.is_online.is_(True)).count(),
+        "offline": visibles.filter(Device.is_online.is_(False)).count(),
+        "a_identifier": visibles.filter(_sans_nom()).count(),
+        "fantomes": _fantomes(_maintenant()).count(),
+    })
 
 
 @main.route("/api/devices/<int:device_id>")
@@ -84,7 +125,7 @@ def api_update_device(device_id):
     data = request.get_json()
 
     if "custom_name" in data:
-        device.custom_name = data["custom_name"] or None
+        device.custom_name = (data["custom_name"] or "").strip() or None
     if "notes" in data:
         device.notes = data["notes"] or None
 
@@ -101,7 +142,60 @@ def api_delete_device(device_id):
     return jsonify({"status": "deleted"})
 
 
-# --- API: History ---
+@main.route("/api/devices/<int:device_id>/archive", methods=["POST"])
+def api_archive_device(device_id):
+    device = db.get_or_404(Device, device_id)
+    device.archived = True
+    device.archived_at = _maintenant()
+    db.session.commit()
+    return jsonify(device.to_dict())
+
+
+@main.route("/api/devices/<int:device_id>/unarchive", methods=["POST"])
+def api_unarchive_device(device_id):
+    device = db.get_or_404(Device, device_id)
+    device.archived = False
+    device.archived_at = None
+    db.session.commit()
+    return jsonify(device.to_dict())
+
+
+@main.route("/api/devices/archive-ghosts", methods=["POST"])
+def api_archive_ghosts():
+    """Archive en une fois les appareils hors ligne depuis plus de 7 jours.
+    Sans {"confirm": true}, ne fait rien et dit combien seraient archivés."""
+    maintenant = _maintenant()
+    fantomes = _fantomes(maintenant).all()
+    data = request.get_json(silent=True) or {}
+    if data.get("confirm") is not True:
+        return jsonify({"archived": 0, "would_archive": len(fantomes)}), 400
+    for device in fantomes:
+        device.archived = True
+        device.archived_at = maintenant
+    db.session.commit()
+    return jsonify({"archived": len(fantomes)})
+
+
+@main.route("/api/devices/<int:device_id>/presence")
+def api_device_presence(device_id):
+    """Présence jour par jour (UTC) sur les N derniers jours, d'après scan_records."""
+    db.get_or_404(Device, device_id)
+    jours = max(1, min(request.args.get("days", 14, type=int), 30))
+    aujourd_hui = _maintenant().date()
+    debut = aujourd_hui - timedelta(days=jours - 1)
+    vus = {
+        r.scan_time.date()
+        for r in ScanRecord.query.with_entities(ScanRecord.scan_time)
+        .filter(ScanRecord.device_id == device_id)
+        .filter(ScanRecord.scan_time >= datetime.combine(debut, datetime.min.time()))
+    }
+    return jsonify([
+        {"date": (debut + timedelta(days=i)).isoformat(), "present": (debut + timedelta(days=i)) in vus}
+        for i in range(jours)
+    ])
+
+
+# --- API : historique ---
 
 
 @main.route("/api/devices/<int:device_id>/history")
@@ -127,126 +221,81 @@ def api_global_history():
     return jsonify([r.to_dict() for r in records])
 
 
-# --- API: Dashboard ---
+# --- API : vue d'ensemble ---
 
 
 @main.route("/api/dashboard")
 def api_dashboard():
-    now = datetime.now(timezone.utc)
-    week_ago = now - timedelta(days=7)
+    maintenant = _maintenant()
+    semaine = maintenant - timedelta(days=7)
+    visibles = Device.query.filter(_visible())
 
-    # Basic counts
-    total = Device.query.count()
-    online = Device.query.filter_by(is_online=True).count()
-    offline = total - online
-    online_percent = round((online / total * 100), 1) if total > 0 else 0
+    total = visibles.count()
+    online = visibles.filter(Device.is_online.is_(True)).count()
 
-    new_this_week = Device.query.filter(Device.first_seen >= week_ago).count()
-    unnamed = Device.query.filter(
-        (Device.custom_name.is_(None)) | (Device.custom_name == "")
-    ).count()
-
-    # Last scan event
-    last_event = ScanEvent.query.order_by(ScanEvent.started_at.desc()).first()
+    dernier = ScanEvent.query.order_by(ScanEvent.started_at.desc()).first()
     last_scan = None
-    if last_event:
-        age_seconds = int((now - last_event.started_at.replace(tzinfo=timezone.utc)).total_seconds())
+    if dernier:
         last_scan = {
-            "started_at": last_event.started_at.isoformat(),
-            "status": last_event.status,
-            "scan_type": last_event.scan_type,
-            "hosts_found": last_event.hosts_found,
-            "age_seconds": age_seconds,
+            "started_at": dernier.started_at.isoformat(),
+            "status": dernier.status,
+            "scan_type": dernier.scan_type,
+            "hosts_found": dernier.hosts_found,
+            "duration_ms": dernier.duration_ms,
+            "age_seconds": int((maintenant - dernier.started_at.replace(tzinfo=None)).total_seconds()),
         }
 
-    # Timeline: hosts found per scan event over last 7 days, daily buckets
-    timeline_events = (
-        ScanEvent.query
-        .filter(ScanEvent.started_at >= week_ago)
-        .filter(ScanEvent.scan_type == "quick")
-        .order_by(ScanEvent.started_at.asc())
-        .all()
-    )
-    daily_buckets = {}
-    for ev in timeline_events:
-        day = ev.started_at.replace(hour=0, minute=0, second=0, microsecond=0)
-        key = day.date().isoformat()
-        # Keep the max hosts_found observed that day
-        if key not in daily_buckets or ev.hosts_found > daily_buckets[key]:
-            daily_buckets[key] = ev.hosts_found
-    timeline = [{"date": k, "hosts": v} for k, v in sorted(daily_buckets.items())]
+    # Courbe : maximum d'hôtes vus par un scan rapide réussi, jour par jour, 7 jours.
+    debut = (maintenant - timedelta(days=6)).date()
+    maxima = {}
+    for ev in (ScanEvent.query
+               .filter(ScanEvent.scan_type == "quick", ScanEvent.status != "failed")
+               .filter(ScanEvent.started_at >= datetime.combine(debut, datetime.min.time()))):
+        jour = ev.started_at.date().isoformat()
+        maxima[jour] = max(maxima.get(jour, 0), ev.hosts_found or 0)
+    timeline = []
+    for i in range(7):
+        jour = (debut + timedelta(days=i)).isoformat()
+        timeline.append({"date": jour, "hosts": maxima.get(jour)})
 
-    # Top vendors
-    vendor_counts = Counter()
-    for dev in Device.query.filter(Device.vendor.isnot(None)).all():
-        vendor_counts[dev.vendor] += 1
-    vendors = [{"name": n, "count": c} for n, c in vendor_counts.most_common(6)]
-
-    # OS families
-    os_counts = Counter()
-    for dev in Device.query.all():
-        os_counts[_os_family(dev.os_info)] += 1
-    os_families = [{"name": n, "count": c} for n, c in os_counts.most_common()]
-
-    # Recent events (last 5)
-    recent_events = (
-        ScanEvent.query.order_by(ScanEvent.started_at.desc()).limit(5).all()
-    )
-
-    # New devices (last 7 days, max 5)
-    new_devices = (
-        Device.query.filter(Device.first_seen >= week_ago)
-        .order_by(Device.first_seen.desc())
-        .limit(5)
-        .all()
-    )
-
-    # Ghost devices (offline, last seen >7 days ago, max 5)
-    ghost_devices = (
-        Device.query.filter(Device.is_online.is_(False))
-        .filter(Device.last_seen < week_ago)
-        .order_by(Device.last_seen.desc())
-        .limit(5)
-        .all()
-    )
+    nouveaux = (visibles.filter(Device.first_seen >= semaine)
+                .order_by(Device.first_seen.desc()).limit(6).all())
+    en_ligne = (visibles.filter(Device.is_online.is_(True))
+                .order_by(Device.custom_name.is_(None), Device.custom_name, Device.ip_address).all())
 
     return jsonify({
         "stats": {
             "total_devices": total,
             "online": online,
-            "offline": offline,
-            "online_percent": online_percent,
-            "new_this_week": new_this_week,
-            "unnamed": unnamed,
+            "offline": total - online,
+            "new_this_week": visibles.filter(Device.first_seen >= semaine).count(),
+            "unnamed": visibles.filter(_sans_nom()).count(),
+            "ghosts": _fantomes(maintenant).count(),
             "last_scan": last_scan,
         },
         "timeline": timeline,
-        "vendors": vendors,
-        "os_families": os_families,
-        "recent_events": [e.to_dict() for e in recent_events],
-        "new_devices": [d.to_dict() for d in new_devices],
-        "ghost_devices": [d.to_dict() for d in ghost_devices],
+        "new_devices": [d.to_dict() for d in nouveaux],
+        "online_devices": [d.to_dict() for d in en_ligne],
     })
 
 
-# --- API: Stats ---
+# --- API : stats ---
 
 
 @main.route("/api/stats")
 def api_stats():
-    total = Device.query.count()
-    online = Device.query.filter_by(is_online=True).count()
-    offline = total - online
-    scans = ScanRecord.query.count()
+    visibles = Device.query.filter(_visible())
+    total = visibles.count()
+    online = visibles.filter(Device.is_online.is_(True)).count()
     return jsonify({
         "total_devices": total,
         "online": online,
-        "offline": offline,
-        "total_scans": scans,
+        "offline": total - online,
+        "total_scans": ScanRecord.query.count(),
     })
 
 
-# --- API: Scan Events (logs) ---
+# --- API : journal des scans ---
 
 
 @main.route("/api/events")
